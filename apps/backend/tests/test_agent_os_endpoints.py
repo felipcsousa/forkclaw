@@ -459,6 +459,8 @@ def test_tool_permissions_are_listed_and_updatable(test_client: TestClient) -> N
         "edit_file",
         "clipboard_read",
         "clipboard_write",
+        "web_search",
+        "web_fetch",
     }
 
     update_response = test_client.put(
@@ -467,6 +469,64 @@ def test_tool_permissions_are_listed_and_updatable(test_client: TestClient) -> N
     )
     assert update_response.status_code == 200
     assert update_response.json()["permission_level"] == "allow"
+
+
+def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestClient) -> None:
+    catalog_response = test_client.get("/tools/catalog")
+    assert catalog_response.status_code == 200
+    catalog_payload = catalog_response.json()
+
+    by_id = {item["id"]: item for item in catalog_payload["items"]}
+    assert by_id["list_files"]["group"] == "group:fs"
+    assert by_id["web_search"]["group"] == "group:web"
+    assert by_id["web_search"]["status"] == "experimental"
+    assert by_id["web_fetch"]["label"] == "Web fetch"
+
+    policy_response = test_client.get("/tools/policy")
+    assert policy_response.status_code == 200
+    policy_payload = policy_response.json()
+
+    assert policy_payload["profile_id"] == "minimal"
+    assert [item["id"] for item in policy_payload["profiles"]] == [
+        "minimal",
+        "coding",
+        "research",
+        "full",
+    ]
+    assert policy_payload["profiles"][0]["defaults"]["group:web"] == "deny"
+
+
+def test_tool_policy_profile_change_recomputes_effective_permissions(test_client: TestClient) -> None:
+    update_response = test_client.put("/tools/policy", json={"profile_id": "research"})
+    assert update_response.status_code == 200
+    assert update_response.json()["profile_id"] == "research"
+
+    permissions_response = test_client.get("/tools/permissions")
+    assert permissions_response.status_code == 200
+    permissions = {
+        item["tool_name"]: item["permission_level"]
+        for item in permissions_response.json()["items"]
+    }
+    assert permissions["web_search"] == "allow"
+    assert permissions["web_fetch"] == "allow"
+    assert permissions["list_files"] == "ask"
+
+
+def test_tool_permission_override_is_reflected_in_policy_state(test_client: TestClient) -> None:
+    profile_response = test_client.put("/tools/policy", json={"profile_id": "research"})
+    assert profile_response.status_code == 200
+
+    override_response = test_client.put(
+        "/tools/permissions/web_fetch",
+        json={"permission_level": "ask"},
+    )
+    assert override_response.status_code == 200
+    assert override_response.json()["permission_level"] == "ask"
+
+    policy_response = test_client.get("/tools/policy")
+    assert policy_response.status_code == 200
+    overrides = {item["tool_name"]: item["permission_level"] for item in policy_response.json()["overrides"]}
+    assert overrides["web_fetch"] == "ask"
 
 
 def test_agent_can_use_allowed_tool_and_persist_tool_call(test_client: TestClient) -> None:

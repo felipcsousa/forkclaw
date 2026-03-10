@@ -19,9 +19,11 @@ import {
   fetchAgentConfig,
   fetchCronJobsDashboard,
   fetchOperationalSettings,
+  fetchToolCatalog,
   fetchSessionMessages,
   fetchSessions,
   fetchToolCalls,
+  fetchToolPolicy,
   fetchToolPermissions,
   getOperationalProviderLabel,
   pauseCronJob,
@@ -29,6 +31,7 @@ import {
   sendSessionMessage,
   updateAgentConfig,
   updateOperationalSettings,
+  updateToolPolicy,
   updateToolPermission,
   type ActivityTimelineItemRecord,
   type AgentConfigUpdate,
@@ -42,9 +45,12 @@ import {
   type OperationalSettingsUpdate,
   type SessionRecord,
   type TaskRunHistoryRecord,
+  type ToolCatalogEntryRecord,
   type ToolCallRecord,
   type ToolPermissionLevel,
   type ToolPermissionRecord,
+  type ToolPolicyProfileId,
+  type ToolPolicyRecord,
 } from '../lib/backend';
 
 const emptyAgentDraft: AgentConfigUpdate = {
@@ -138,6 +144,8 @@ export function useAppController() {
   const [isSavingOperationalSettings, setIsSavingOperationalSettings] =
     useState(false);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
+  const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntryRecord[]>([]);
+  const [toolPolicy, setToolPolicy] = useState<ToolPolicyRecord | null>(null);
   const [toolPermissions, setToolPermissions] = useState<
     ToolPermissionRecord[]
   >([]);
@@ -251,11 +259,23 @@ export function useAppController() {
   const loadTools = useCallback(async () => {
     const response = await runAsyncAction(
       async () => {
-        const [permissionsResponse, callsResponse] = await Promise.all([
+        const [
+          catalogResponse,
+          policyResponse,
+          permissionsResponse,
+          callsResponse,
+        ] = await Promise.all([
+          fetchToolCatalog(),
+          fetchToolPolicy(),
           fetchToolPermissions(),
           fetchToolCalls(),
         ]);
-        return { permissionsResponse, callsResponse };
+        return {
+          catalogResponse,
+          policyResponse,
+          permissionsResponse,
+          callsResponse,
+        };
       },
       {
         setPending: setIsLoadingTools,
@@ -266,6 +286,8 @@ export function useAppController() {
       return;
     }
 
+    setToolCatalog(response.catalogResponse.items);
+    setToolPolicy(response.policyResponse);
     setWorkspaceRoot(response.permissionsResponse.workspace_root);
     setToolPermissions(response.permissionsResponse.items);
     setToolCalls(response.callsResponse.items);
@@ -613,7 +635,13 @@ export function useAppController() {
     permissionLevel: ToolPermissionLevel,
   ) {
     const updated = await runAsyncAction(
-      () => updateToolPermission(toolName, permissionLevel),
+      async () => {
+        const [permission, policy] = await Promise.all([
+          updateToolPermission(toolName, permissionLevel),
+          fetchToolPolicy(),
+        ]);
+        return { permission, policy };
+      },
       {
         setPending: setIsUpdatingToolPermission,
         errorMessage: 'Failed to update tool permission.',
@@ -623,9 +651,35 @@ export function useAppController() {
       return;
     }
 
+    setToolPolicy(updated.policy);
     setToolPermissions((current) =>
-      current.map((item) => (item.id === updated.id ? updated : item)),
+      current.map((item) =>
+        item.id === updated.permission.id ? updated.permission : item,
+      ),
     );
+  }
+
+  async function handleChangeToolPolicyProfile(profileId: ToolPolicyProfileId) {
+    const updated = await runAsyncAction(
+      async () => {
+        const [policy, permissionsResponse] = await Promise.all([
+          updateToolPolicy(profileId),
+          fetchToolPermissions(),
+        ]);
+        return { policy, permissionsResponse };
+      },
+      {
+        setPending: setIsUpdatingToolPermission,
+        errorMessage: 'Failed to update tool policy profile.',
+      },
+    );
+    if (!updated) {
+      return;
+    }
+
+    setToolPolicy(updated.policy);
+    setWorkspaceRoot(updated.permissionsResponse.workspace_root);
+    setToolPermissions(updated.permissionsResponse.items);
   }
 
   async function handleApproveApproval(approvalId: string) {
@@ -828,6 +882,7 @@ export function useAppController() {
     handleActivateJob,
     handleAgentDraftChange,
     handleApproveApproval,
+    handleChangeToolPolicyProfile,
     handleChangeToolPermission,
     handleCreateJob,
     handleCreateSession,
@@ -876,6 +931,8 @@ export function useAppController() {
     setErrorMessage,
     setMobileNavOpen,
     toolCalls,
+    toolCatalog,
+    toolPolicy,
     toolPermissions,
     view,
     workspaceRoot,

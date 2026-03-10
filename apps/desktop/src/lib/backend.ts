@@ -162,6 +162,16 @@ export interface OperationalSettingsUpdate {
 }
 
 export type ToolPermissionLevel = 'deny' | 'ask' | 'allow';
+export type ToolGroup =
+  | 'group:fs'
+  | 'group:runtime'
+  | 'group:web'
+  | 'group:sessions'
+  | 'group:memory'
+  | 'group:automation';
+export type ToolRisk = 'low' | 'medium' | 'high';
+export type ToolStatus = 'enabled' | 'experimental' | 'disabled';
+export type ToolPolicyProfileId = 'minimal' | 'coding' | 'research' | 'full';
 
 export interface ToolPermissionRecord {
   id: string;
@@ -178,6 +188,46 @@ export interface ToolPermissionRecord {
 export interface ToolPermissionsResponse {
   workspace_root: string;
   items: ToolPermissionRecord[];
+}
+
+export interface ToolCatalogEntryRecord {
+  id: string;
+  label: string;
+  description: string;
+  group: ToolGroup;
+  group_label: string;
+  risk: ToolRisk;
+  status: ToolStatus;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown> | null;
+  requires_workspace: boolean;
+}
+
+export interface ToolCatalogResponse {
+  items: ToolCatalogEntryRecord[];
+}
+
+export interface ToolPolicyProfileRecord {
+  id: ToolPolicyProfileId;
+  label: string;
+  description: string;
+  defaults: Partial<Record<ToolGroup, ToolPermissionLevel>>;
+}
+
+export interface ToolPolicyOverrideRecord {
+  id: string;
+  agent_id: string;
+  tool_name: string;
+  permission_level: ToolPermissionLevel;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolPolicyRecord {
+  profile_id: ToolPolicyProfileId;
+  profiles: ToolPolicyProfileRecord[];
+  overrides: ToolPolicyOverrideRecord[];
 }
 
 export interface ToolCallRecord {
@@ -478,6 +528,22 @@ export function updateOperationalSettings(
   payload: OperationalSettingsUpdate,
 ): Promise<OperationalSettingsRecord> {
   return sendJson<OperationalSettingsRecord>('PUT', '/settings/operational', payload);
+}
+
+export function fetchToolCatalog(): Promise<ToolCatalogResponse> {
+  return getJson<ToolCatalogResponse>('/tools/catalog');
+}
+
+export function fetchToolPolicy(): Promise<ToolPolicyRecord> {
+  return getJson<ToolPolicyRecord>('/tools/policy');
+}
+
+export function updateToolPolicy(
+  profileId: ToolPolicyProfileId,
+): Promise<ToolPolicyRecord> {
+  return sendJson<ToolPolicyRecord>('PUT', '/tools/policy', {
+    profile_id: profileId,
+  });
 }
 
 export function fetchToolPermissions(): Promise<ToolPermissionsResponse> {

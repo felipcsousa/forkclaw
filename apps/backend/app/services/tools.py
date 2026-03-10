@@ -9,12 +9,21 @@ from sqlmodel import Session
 from app.core.config import get_settings
 from app.core.provider_catalog import ToolFormat
 from app.kernel.contracts import KernelExecutionRequest
-from app.models.entities import ToolPermission
+from app.models.entities import ToolPermission, ToolPolicyOverride
 from app.repositories.agent_profile import AgentProfileRepository
 from app.repositories.tools import ToolingRepository
 from app.schemas.tool import PermissionLevel
 from app.tools.base import ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort
+from app.tools.catalog import ToolCatalogEntry, build_tool_catalog
+from app.tools.policies import (
+    ToolPolicyProfile,
+    ToolPolicyProfileId,
+    get_tool_policy_profile,
+    list_tool_policy_profiles,
+    resolve_effective_permission_level,
+)
 from app.tools.registry import build_tool_registry
+from app.tools.web.cache import SqlToolCacheStore
 
 
 class ToolService(ToolExecutionPort):
@@ -22,6 +31,7 @@ class ToolService(ToolExecutionPort):
         self.agent_repository = AgentProfileRepository(session)
         self.repository = ToolingRepository(session)
         self.registry = build_tool_registry()
+        self.catalog = build_tool_catalog()
 
     def list_permissions(self) -> tuple[str, list[ToolPermission]]:
         agent = self.agent_repository.get_default_agent()
@@ -29,29 +39,70 @@ class ToolService(ToolExecutionPort):
             msg = "Default agent not found."
             raise ValueError(msg)
 
+        self._materialize_permissions(agent.id)
         workspace_root = self._workspace_root()
         permissions = self.repository.list_permissions(agent.id)
         return str(workspace_root), permissions
 
-    def update_permission(self, tool_name: str, level: PermissionLevel) -> ToolPermission:
-        agent = self.agent_repository.get_default_agent()
-        if agent is None:
-            msg = "Default agent not found."
-            raise ValueError(msg)
+    def list_catalog(self) -> list[ToolCatalogEntry]:
+        return self.catalog
 
-        self.registry.get(tool_name)
-        permission = self.repository.get_permission(agent.id, tool_name)
-        if permission is None:
+    def get_policy(self) -> tuple[ToolPolicyProfileId, list[ToolPolicyProfile], list[ToolPolicyOverride]]:
+        agent = self._require_default_agent()
+        self._materialize_permissions(agent.id)
+        profile_id = self._active_profile_id()
+        profiles = list_tool_policy_profiles()
+        overrides = self.repository.list_overrides(agent.id)
+        return profile_id, profiles, overrides
+
+    def update_policy_profile(
+        self,
+        profile_id: ToolPolicyProfileId,
+    ) -> tuple[ToolPolicyProfileId, list[ToolPolicyProfile], list[ToolPolicyOverride]]:
+        agent = self._require_default_agent()
+        get_tool_policy_profile(profile_id)
+        self.repository.upsert_setting(
+            scope="tools",
+            key="policy_profile",
+            value_type="string",
+            value_text=profile_id,
+        )
+        self._materialize_permissions(agent.id)
+        return self.get_policy()
+
+    def update_permission(self, tool_name: str, level: PermissionLevel) -> ToolPermission:
+        agent = self._require_default_agent()
+        catalog_entry = self._require_catalog_entry(tool_name)
+        self._materialize_permissions(agent.id)
+
+        default_level = resolve_effective_permission_level(
+            profile_id=self._active_profile_id(),
+            tool_group=catalog_entry.group,
+            override_level=None,
+        )
+        override = self.repository.get_override(agent.id, tool_name)
+
+        if level == default_level:
+            if override is not None:
+                self.repository.delete_override(override)
+        else:
+            if override is None:
+                override = ToolPolicyOverride(
+                    agent_id=agent.id,
+                    tool_name=tool_name,
+                    permission_level=level,
+                    status="active",
+                )
+            else:
+                override.permission_level = level
+                override.status = "active"
+            self.repository.save_override(override)
+
+        self._materialize_permissions(agent.id)
+        saved = self.repository.get_permission(agent.id, tool_name)
+        if saved is None:
             msg = f"Tool permission not found for {tool_name}."
             raise ValueError(msg)
-
-        permission.permission_level = level
-        permission.approval_required = level == "ask"
-        if permission.tool_name.startswith(("list_", "read_", "write_", "edit_")):
-            permission.workspace_path = str(self._workspace_root())
-        else:
-            permission.workspace_path = None
-        saved = self.repository.save_permission(permission)
         self.repository.record_audit_event(
             agent_id=agent.id,
             event_type="tool_permission.updated",
@@ -66,6 +117,7 @@ class ToolService(ToolExecutionPort):
         if agent is None:
             msg = "Default agent not found."
             raise ValueError(msg)
+        self._materialize_permissions(agent.id)
         return self.repository.list_tool_calls(agent.id)
 
     def describe_tools(
@@ -83,6 +135,7 @@ class ToolService(ToolExecutionPort):
         tool_call: ToolCallRequest,
         approval_override: bool = False,
     ) -> ToolExecutionOutcome:
+        self._materialize_permissions(request.identity.agent_id)
         permission = self.repository.get_permission(request.identity.agent_id, tool_call.name)
         tool_record = self.repository.create_tool_call(
             session_id=request.session.session_id,
@@ -224,7 +277,17 @@ class ToolService(ToolExecutionPort):
         arguments: dict,
     ):
         tool = self.registry.get(tool_name)
-        context = ToolExecutionContext(workspace_root=self._context_workspace_root(permission))
+        context = ToolExecutionContext(
+            workspace_root=self._context_workspace_root(permission),
+            cache_store=SqlToolCacheStore(self.repository),
+            runtime_settings={
+                "tool_timeout_seconds": get_settings().tool_timeout_seconds,
+                "web_search_cache_ttl_seconds": get_settings().web_search_cache_ttl_seconds,
+                "web_fetch_cache_ttl_seconds": get_settings().web_fetch_cache_ttl_seconds,
+                "web_fetch_max_response_bytes": get_settings().web_fetch_max_response_bytes,
+                "web_fetch_default_max_chars": get_settings().web_fetch_default_max_chars,
+            },
+        )
         return tool.execute(context=context, arguments=arguments)
 
     def _record_completed_tool_call(
@@ -293,6 +356,48 @@ class ToolService(ToolExecutionPort):
         if setting and setting.value_text:
             return Path(setting.value_text).resolve()
         return get_settings().default_workspace_root
+
+    def _require_default_agent(self):
+        agent = self.agent_repository.get_default_agent()
+        if agent is None:
+            msg = "Default agent not found."
+            raise ValueError(msg)
+        return agent
+
+    def _require_catalog_entry(self, tool_name: str) -> ToolCatalogEntry:
+        for item in self.catalog:
+            if item.id == tool_name:
+                return item
+        msg = f"Unknown tool: {tool_name}"
+        raise ValueError(msg)
+
+    def _active_profile_id(self) -> ToolPolicyProfileId:
+        setting = self.repository.get_setting("tools", "policy_profile")
+        candidate = setting.value_text if setting and setting.value_text else "minimal"
+        profile = get_tool_policy_profile(candidate)
+        return profile.id
+
+    def _materialize_permissions(self, agent_id: str) -> None:
+        profile_id = self._active_profile_id()
+        overrides_by_tool = {
+            override.tool_name: override.permission_level
+            for override in self.repository.list_overrides(agent_id)
+        }
+        workspace_root = str(self._workspace_root())
+
+        for item in self.catalog:
+            level = resolve_effective_permission_level(
+                profile_id=profile_id,
+                tool_group=item.group,
+                override_level=overrides_by_tool.get(item.id),
+            )
+            self.repository.upsert_permission(
+                agent_id=agent_id,
+                tool_name=item.id,
+                permission_level=level,
+                workspace_path=workspace_root if item.requires_workspace else None,
+                approval_required=level == "ask",
+            )
 
     def _context_workspace_root(self, permission: ToolPermission) -> Path:
         if permission.workspace_path:

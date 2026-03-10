@@ -6,8 +6,14 @@ from sqlmodel import Session
 from app.api.errors import value_error_as_http_exception
 from app.db.session import get_session
 from app.schemas.tool import (
+    ToolCatalogEntryRead,
+    ToolCatalogResponse,
     ToolCallRead,
     ToolCallsResponse,
+    ToolPolicyOverrideRead,
+    ToolPolicyProfileRead,
+    ToolPolicyRead,
+    ToolPolicyUpdate,
     ToolPermissionRead,
     ToolPermissionsResponse,
     ToolPermissionUpdate,
@@ -15,6 +21,76 @@ from app.schemas.tool import (
 from app.services.tools import ToolService
 
 router = APIRouter(tags=["tools"])
+
+
+@router.get("/tools/catalog", response_model=ToolCatalogResponse)
+def get_tool_catalog(session: Session = Depends(get_session)) -> ToolCatalogResponse:
+    service = ToolService(session)
+    items = [
+        ToolCatalogEntryRead(
+            id=item.id,
+            label=item.label,
+            description=item.description,
+            group=item.group,
+            group_label=item.group_label,
+            risk=item.risk,
+            status=item.status,
+            input_schema=item.input_schema,
+            output_schema=item.output_schema,
+            requires_workspace=item.requires_workspace,
+        )
+        for item in service.list_catalog()
+    ]
+    return ToolCatalogResponse(items=items)
+
+
+@router.get("/tools/policy", response_model=ToolPolicyRead)
+def get_tool_policy(session: Session = Depends(get_session)) -> ToolPolicyRead:
+    service = ToolService(session)
+    try:
+        profile_id, profiles, overrides = service.get_policy()
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc, default_status=404) from exc
+
+    return ToolPolicyRead(
+        profile_id=profile_id,
+        profiles=[
+            ToolPolicyProfileRead(
+                id=profile.id,
+                label=profile.label,
+                description=profile.description,
+                defaults=profile.defaults,
+            )
+            for profile in profiles
+        ],
+        overrides=[ToolPolicyOverrideRead.model_validate(item) for item in overrides],
+    )
+
+
+@router.put("/tools/policy", response_model=ToolPolicyRead)
+def update_tool_policy(
+    payload: ToolPolicyUpdate,
+    session: Session = Depends(get_session),
+) -> ToolPolicyRead:
+    service = ToolService(session)
+    try:
+        profile_id, profiles, overrides = service.update_policy_profile(payload.profile_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc, default_status=404) from exc
+
+    return ToolPolicyRead(
+        profile_id=profile_id,
+        profiles=[
+            ToolPolicyProfileRead(
+                id=profile.id,
+                label=profile.label,
+                description=profile.description,
+                defaults=profile.defaults,
+            )
+            for profile in profiles
+        ],
+        overrides=[ToolPolicyOverrideRead.model_validate(item) for item in overrides],
+    )
 
 
 @router.get("/tools/permissions", response_model=ToolPermissionsResponse)
