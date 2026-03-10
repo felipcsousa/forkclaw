@@ -7,6 +7,7 @@ from nanobot.providers.base import ToolCallRequest
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.core.provider_catalog import ToolFormat
 from app.kernel.contracts import KernelExecutionRequest
 from app.models.entities import ToolPermission
 from app.repositories.agent_profile import AgentProfileRepository
@@ -67,8 +68,13 @@ class ToolService(ToolExecutionPort):
             raise ValueError(msg)
         return self.repository.list_tool_calls(agent.id)
 
-    def describe_tools(self, tool_names: list[str] | None = None) -> list[dict]:
-        return self.registry.describe(tool_names)
+    def describe_tools(
+        self,
+        tool_names: list[str] | None = None,
+        *,
+        format: ToolFormat = "openai",
+    ) -> list[dict]:
+        return self.registry.describe(tool_names, format=format)
 
     def execute_tool_call(
         self,

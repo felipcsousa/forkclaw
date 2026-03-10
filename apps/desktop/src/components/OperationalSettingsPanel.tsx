@@ -12,6 +12,10 @@ import type {
   OperationalSettingsRecord,
   OperationalSettingsUpdate,
 } from '../lib/backend';
+import {
+  getOperationalProviderLabel,
+  getOperationalProviderSuggestedModel,
+} from '../lib/backend';
 
 interface OperationalSettingsPanelProps {
   settings: OperationalSettingsRecord | null;
@@ -25,13 +29,14 @@ interface OperationalSettingsPanelProps {
   onSave: () => void;
 }
 
-const providerOptions: Array<{ value: OperationalProvider; label: string }> = [
-  { value: 'product_echo', label: 'Product Echo (local fallback)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'gemini', label: 'Gemini' },
+const providerOptions: OperationalProvider[] = [
+  'product_echo',
+  'openai',
+  'anthropic',
+  'openrouter',
+  'deepseek',
+  'gemini',
+  'kimi-coding',
 ];
 
 const defaultViewOptions: Array<{ value: OperationalDefaultView; label: string }> = [
@@ -54,6 +59,7 @@ export function OperationalSettingsPanel({
 }: OperationalSettingsPanelProps) {
   const disabled = isLoading || isSaving;
   const idBase = useId();
+  const suggestedModel = getOperationalProviderSuggestedModel(draft.provider);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,19 +97,28 @@ export function OperationalSettingsPanel({
                   }
                   disabled={disabled}
                 >
-                  {providerOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {providerOptions.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {getOperationalProviderLabel(provider)}
                     </option>
                   ))}
                 </SelectInput>
               </Field>
-              <Field label="Default model" htmlFor={`${idBase}-model`}>
+              <Field
+                label="Default model"
+                htmlFor={`${idBase}-model`}
+                hint={
+                  draft.provider === 'kimi-coding'
+                    ? 'Suggested for Kimi for Coding: k2p5.'
+                    : undefined
+                }
+              >
                 <Input
                   id={`${idBase}-model`}
                   value={draft.model_name}
                   onChange={(e) => onDraftChange('model_name', e.target.value)}
                   disabled={disabled}
+                  placeholder={suggestedModel || undefined}
                   required
                 />
               </Field>

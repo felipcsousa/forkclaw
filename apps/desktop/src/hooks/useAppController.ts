@@ -23,6 +23,7 @@ import {
   fetchSessions,
   fetchToolCalls,
   fetchToolPermissions,
+  getOperationalProviderLabel,
   pauseCronJob,
   resetAgentConfig,
   sendSessionMessage,
@@ -764,10 +765,9 @@ export function useAppController() {
   const activeJobsCount = cronJobs.filter(
     (job) => job.status === 'active',
   ).length;
-  const providerLabel =
-    operationalSettings?.provider ||
-    agent?.profile?.model_provider ||
-    'product_echo';
+  const providerLabel = getOperationalProviderLabel(
+    operationalSettings?.provider || agent?.profile?.model_provider || 'product_echo',
+  );
   const agentTitle = agent?.name || 'Nanobot Agent';
 
   const getViewCount = useCallback(

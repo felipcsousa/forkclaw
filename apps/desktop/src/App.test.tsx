@@ -34,6 +34,15 @@ const mockPauseCronJob = vi.fn();
 const mockActivateCronJob = vi.fn();
 const mockDeleteCronJob = vi.fn();
 const defaultMatchMedia = window.matchMedia;
+const providerLabelMap: Record<string, string> = {
+  product_echo: 'Product Echo (local fallback)',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  'kimi-coding': 'Kimi for Coding',
+};
 
 const defaultHeartbeat = {
   last_run_at: null,
@@ -158,6 +167,14 @@ vi.mock('./lib/backend', () => ({
   pauseCronJob: (jobId: string) => mockPauseCronJob(jobId),
   activateCronJob: (jobId: string) => mockActivateCronJob(jobId),
   deleteCronJob: (jobId: string) => mockDeleteCronJob(jobId),
+  getOperationalProviderLabel: (provider: string) =>
+    providerLabelMap[provider] || provider,
+  getOperationalProviderSuggestedModel: (provider: string) =>
+    provider === 'kimi-coding'
+      ? 'k2p5'
+      : provider === 'product_echo'
+        ? 'product-echo/simple'
+        : null,
 }));
 
 const agentConfig = {
@@ -616,6 +633,72 @@ describe('App', () => {
     );
 
     expect(screen.getByText(/Key configured/i)).toBeInTheDocument();
+  });
+
+  it('exposes Kimi for Coding in settings and preserves the rest of the draft', async () => {
+    mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockUpdateOperationalSettings.mockResolvedValueOnce({
+      provider: 'kimi-coding',
+      model_name: 'k2p5',
+      workspace_root: '/kimi-workspace',
+      max_iterations_per_execution: 2,
+      daily_budget_usd: 10,
+      monthly_budget_usd: 200,
+      default_view: 'chat',
+      activity_poll_seconds: 3,
+      provider_api_key_configured: false,
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText(/^provider$/i, { selector: 'select' }),
+      ).toBeInTheDocument(),
+    );
+
+    expect(
+      screen.getByRole('option', { name: 'Kimi for Coding' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    fireEvent.change(screen.getAllByLabelText(/workspace root/i)[0], {
+      target: { value: '/kimi-workspace' },
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Provider' }));
+    fireEvent.change(screen.getByLabelText(/^provider$/i, { selector: 'select' }), {
+      target: { value: 'kimi-coding' },
+    });
+
+    const modelInput = screen.getByLabelText(/default model/i);
+    expect(modelInput).toHaveAttribute('placeholder', 'k2p5');
+    fireEvent.change(modelInput, {
+      target: { value: 'k2p5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }));
+
+    await waitFor(() =>
+      expect(mockUpdateOperationalSettings).toHaveBeenCalledWith({
+        provider: 'kimi-coding',
+        model_name: 'k2p5',
+        workspace_root: '/kimi-workspace',
+        max_iterations_per_execution: 2,
+        daily_budget_usd: 10,
+        monthly_budget_usd: 200,
+        default_view: 'chat',
+        activity_poll_seconds: 3,
+        api_key: null,
+        clear_api_key: false,
+      }),
+    );
+
+    expect(screen.getAllByText('Kimi for Coding').length).toBeGreaterThan(0);
   });
 
   it('approves a pending tool request from the approvals inbox', async () => {

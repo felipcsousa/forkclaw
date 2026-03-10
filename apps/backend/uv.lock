@@ -943,6 +943,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "keyring" },
     { name = "nanobot-ai" },
     { name = "sqlalchemy" },
@@ -952,7 +953,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pyinstaller" },
     { name = "pytest" },
     { name = "ruff" },
@@ -962,6 +962,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.16.5,<2.0.0" },
     { name = "fastapi", specifier = ">=0.116.1,<1.0.0" },
+    { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "keyring", specifier = ">=25.6.0,<26.0.0" },
     { name = "nanobot-ai", specifier = ">=0.1.4.post3,<0.2.0" },
     { name = "sqlalchemy", specifier = ">=2.0.43,<3.0.0" },
@@ -971,7 +972,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "pyinstaller", specifier = ">=6.16.0,<7.0.0" },
     { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
     { name = "ruff", specifier = ">=0.13.0,<1.0.0" },

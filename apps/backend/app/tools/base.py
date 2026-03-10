@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from nanobot.providers.base import ToolCallRequest
 
+from app.core.provider_catalog import ToolFormat
 from app.kernel.contracts import KernelExecutionRequest
 
 
@@ -61,7 +62,12 @@ class LocalTool(Protocol):
 
 
 class ToolExecutionPort(Protocol):
-    def describe_tools(self, tool_names: list[str] | None = None) -> list[dict[str, Any]]:
+    def describe_tools(
+        self,
+        tool_names: list[str] | None = None,
+        *,
+        format: ToolFormat = "openai",
+    ) -> list[dict[str, Any]]:
         """Return provider-facing tool schemas."""
 
     def execute_tool_call(

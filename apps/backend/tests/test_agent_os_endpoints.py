@@ -186,6 +186,109 @@ def test_operational_settings_round_trip_and_sync_workspace(
     assert {item.workspace_path for item in file_permissions} == {str(new_workspace)}
 
 
+def test_operational_settings_accepts_kimi_alias_and_persists_canonical_provider(
+    test_client: TestClient,
+) -> None:
+    workspace_root = test_client.get("/settings/operational").json()["workspace_root"]
+
+    response = test_client.put(
+        "/settings/operational",
+        json={
+            "provider": "kimi-for-coding",
+            "model_name": "k2p5",
+            "workspace_root": workspace_root,
+            "max_iterations_per_execution": 2,
+            "daily_budget_usd": 10,
+            "monthly_budget_usd": 200,
+            "default_view": "chat",
+            "activity_poll_seconds": 3,
+            "api_key": "kimi-secret",
+            "clear_api_key": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "kimi-coding"
+    assert payload["model_name"] == "k2p5"
+    assert payload["provider_api_key_configured"] is True
+
+    with get_db_session() as session:
+        profile = session.exec(select(AgentProfile)).one()
+        provider_setting = session.exec(
+            select(Setting.value_text).where(
+                Setting.scope == "runtime",
+                Setting.key == "default_model_provider",
+            )
+        ).one()
+
+    assert profile.model_provider == "kimi-coding"
+    assert provider_setting == "kimi-coding"
+
+
+def test_operational_settings_read_normalizes_legacy_kimi_provider(
+    test_client: TestClient,
+) -> None:
+    with get_db_session() as session:
+        provider_setting = session.exec(
+            select(Setting).where(
+                Setting.scope == "runtime",
+                Setting.key == "default_model_provider",
+            )
+        ).one()
+        model_setting = session.exec(
+            select(Setting).where(
+                Setting.scope == "runtime",
+                Setting.key == "default_model_name",
+            )
+        ).one()
+        profile = session.exec(select(AgentProfile)).one()
+
+        provider_setting.value_text = "kimi-for-coding"
+        model_setting.value_text = ""
+        profile.model_provider = "kimi-for-coding"
+        profile.model_name = None
+        session.add(provider_setting)
+        session.add(model_setting)
+        session.add(profile)
+        session.commit()
+
+    response = test_client.get("/settings/operational")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "kimi-coding"
+    assert payload["model_name"] == "k2p5"
+    assert payload["provider_api_key_configured"] is False
+
+
+def test_operational_settings_accepts_canonical_kimi_provider(
+    test_client: TestClient,
+) -> None:
+    workspace_root = test_client.get("/settings/operational").json()["workspace_root"]
+
+    response = test_client.put(
+        "/settings/operational",
+        json={
+            "provider": "kimi-coding",
+            "model_name": "k2p5",
+            "workspace_root": workspace_root,
+            "max_iterations_per_execution": 2,
+            "daily_budget_usd": 10,
+            "monthly_budget_usd": 200,
+            "default_view": "settings",
+            "activity_poll_seconds": 4,
+            "api_key": None,
+            "clear_api_key": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "kimi-coding"
+    assert payload["model_name"] == "k2p5"
+
+
 def test_budget_limit_blocks_new_execution(test_client: TestClient) -> None:
     workspace_root = test_client.get("/settings/operational").json()["workspace_root"]
     update_response = test_client.put(

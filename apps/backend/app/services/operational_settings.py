@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.core.provider_catalog import get_default_model, normalize_provider_id
 from app.core.secrets import get_secret_store
 from app.models.entities import Agent, AgentProfile
 from app.repositories.operational_settings import OperationalSettingsRepository
@@ -41,6 +42,8 @@ class OperationalSettingsService:
         payload: OperationalSettingsUpdate,
     ) -> OperationalSettingsRead:
         agent, profile = self._require_default_bundle()
+        provider = normalize_provider_id(payload.provider)
+        model_name = payload.model_name.strip()
         workspace_root = Path(payload.workspace_root).expanduser().resolve()
         if not workspace_root.exists() or not workspace_root.is_dir():
             msg = "Workspace root must point to an existing directory."
@@ -54,13 +57,13 @@ class OperationalSettingsService:
             scope="runtime",
             key="default_model_provider",
             value_type="string",
-            value_text=payload.provider,
+            value_text=provider,
         )
         self.repository.upsert_setting(
             scope="runtime",
             key="default_model_name",
             value_type="string",
-            value_text=payload.model_name.strip(),
+            value_text=model_name,
         )
         self.repository.upsert_setting(
             scope="runtime",
@@ -99,15 +102,15 @@ class OperationalSettingsService:
             value_text=str(payload.activity_poll_seconds),
         )
 
-        profile.model_provider = payload.provider
-        profile.model_name = payload.model_name.strip()
+        profile.model_provider = provider
+        profile.model_name = model_name
         self.repository.save_profile(profile)
         self.repository.update_workspace_permissions(agent.id, str(workspace_root))
 
         if payload.clear_api_key:
-            self.secret_store.delete_provider_api_key(payload.provider)
-        elif payload.provider != "product_echo" and payload.api_key:
-            self.secret_store.set_provider_api_key(payload.provider, payload.api_key.strip())
+            self.secret_store.delete_provider_api_key(provider)
+        elif provider != "product_echo" and payload.api_key:
+            self.secret_store.set_provider_api_key(provider, payload.api_key.strip())
 
         self.repository.record_audit_event(
             agent_id=agent.id,
@@ -115,15 +118,15 @@ class OperationalSettingsService:
             entity_type="setting",
             entity_id=agent.id,
             payload={
-                "provider": payload.provider,
-                "model_name": payload.model_name.strip(),
+                "provider": provider,
+                "model_name": model_name,
                 "workspace_root": str(workspace_root),
                 "max_iterations_per_execution": payload.max_iterations_per_execution,
                 "daily_budget_usd": payload.daily_budget_usd,
                 "monthly_budget_usd": payload.monthly_budget_usd,
                 "default_view": payload.default_view,
                 "activity_poll_seconds": payload.activity_poll_seconds,
-                "api_key_configured": bool(payload.api_key and payload.provider != "product_echo"),
+                "api_key_configured": bool(payload.api_key and provider != "product_echo"),
                 "api_key_cleared": payload.clear_api_key,
             },
             summary_text="Operational settings updated.",
@@ -211,15 +214,18 @@ class OperationalSettingsService:
         workspace_root: Path | None = None,
     ) -> OperationalSettingsRead:
         settings = get_settings()
-        provider = self._get_text_setting(
-            "runtime",
-            "default_model_provider",
-            profile.model_provider or settings.default_model_provider,
+        provider = normalize_provider_id(
+            self._get_text_setting(
+                "runtime",
+                "default_model_provider",
+                profile.model_provider or settings.default_model_provider,
+            )
         )
-        model_name = self._get_text_setting(
-            "runtime",
-            "default_model_name",
-            profile.model_name or settings.default_model_name,
+        model_name = self._resolve_model_name(
+            provider=provider,
+            profile=profile,
+            app_default_provider=settings.default_model_provider,
+            app_default_model=settings.default_model_name,
         )
         resolved_workspace_root = (
             workspace_root
@@ -265,6 +271,40 @@ class OperationalSettingsService:
                 provider != "product_echo" and self.secret_store.get_provider_api_key(provider)
             ),
         )
+
+    def _resolve_model_name(
+        self,
+        *,
+        provider: str,
+        profile: AgentProfile,
+        app_default_provider: str,
+        app_default_model: str,
+    ) -> str:
+        setting = self.repository.get_setting("runtime", "default_model_name")
+        if setting and setting.value_text and setting.value_text.strip():
+            return setting.value_text.strip()
+
+        profile_provider = (profile.model_provider or "").strip()
+        if profile_provider:
+            try:
+                if normalize_provider_id(profile_provider) == provider and profile.model_name:
+                    model_name = profile.model_name.strip()
+                    if model_name:
+                        return model_name
+            except ValueError:
+                pass
+
+        try:
+            default_provider = normalize_provider_id(app_default_provider)
+        except ValueError:
+            default_provider = "product_echo"
+
+        if default_provider == provider:
+            model_name = app_default_model.strip()
+            if model_name:
+                return model_name
+
+        return get_default_model(provider)
 
     def _get_text_setting(self, scope: str, key: str, default: str) -> str:
         setting = self.repository.get_setting(scope, key)

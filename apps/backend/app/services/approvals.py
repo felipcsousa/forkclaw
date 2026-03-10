@@ -100,10 +100,19 @@ class ApprovalService:
                 ),
             )
         else:
+            tool_arguments = {}
+            if bundle.tool_call.input_json:
+                try:
+                    parsed_arguments = json.loads(bundle.tool_call.input_json)
+                except json.JSONDecodeError:
+                    parsed_arguments = {}
+                if isinstance(parsed_arguments, dict):
+                    tool_arguments = parsed_arguments
             result = self._resume_kernel(
                 request=request,
                 tool_name=bundle.tool_call.tool_name,
                 tool_call_id=bundle.tool_call.id,
+                tool_arguments=tool_arguments,
                 tool_output=tool_outcome.output_text,
             )
 
@@ -213,7 +222,15 @@ class ApprovalService:
             task_run_id=bundle.task_run.id if bundle.task_run else None,
         )
 
-    def _resume_kernel(self, *, request, tool_name: str, tool_call_id: str, tool_output: str):
+    def _resume_kernel(
+        self,
+        *,
+        request,
+        tool_name: str,
+        tool_call_id: str,
+        tool_arguments: dict[str, object] | None,
+        tool_output: str,
+    ):
         import asyncio
 
         return asyncio.run(
@@ -221,6 +238,7 @@ class ApprovalService:
                 request,
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
+                tool_arguments=tool_arguments,
                 tool_output=tool_output,
             )
         )
