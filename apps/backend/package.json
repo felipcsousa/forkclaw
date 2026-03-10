@@ -1,0 +1,14 @@
+{
+  "name": "@nanobot/backend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "migrate": "uv run python -m app.db.migrations",
+    "seed": "uv run python -m app.db.seed",
+    "dev": "npm run migrate && npm run seed && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "package:sidecar": "uv run python ../../infra/scripts/build_backend_sidecar.py",
+    "lint": "uv run ruff check .",
+    "format": "uv run ruff format .",
+    "test": "uv run pytest"
+  }
+}

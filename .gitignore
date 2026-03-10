@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.mypy_cache/
+__pycache__/
+*.pyc
+apps/backend/.venv/
+apps/backend/.python-version
+apps/backend/.coverage
+apps/backend/htmlcov/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/

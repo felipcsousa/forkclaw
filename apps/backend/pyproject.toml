@@ -1,0 +1,40 @@
+[project]
+name = "nanobot-agent-backend"
+version = "0.1.0"
+description = "Local backend for the Nanobot Agent Console desktop app."
+readme = "../../README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "alembic>=1.16.5,<2.0.0",
+    "fastapi>=0.116.1,<1.0.0",
+    "keyring>=25.6.0,<26.0.0",
+    "nanobot-ai>=0.1.4.post3,<0.2.0",
+    "sqlalchemy>=2.0.43,<3.0.0",
+    "sqlmodel>=0.0.24,<0.1.0",
+    "uvicorn[standard]>=0.35.0,<1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1,<1.0.0",
+    "pyinstaller>=6.16.0,<7.0.0",
+    "pytest>=8.4.2,<9.0.0",
+    "ruff>=0.13.0,<1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

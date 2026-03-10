@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import os
+import sys
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class Settings:
+    app_name: str
+    app_version: str
+    backend_root: Path
+    data_dir: Path
+    logs_dir: Path
+    artifacts_dir: Path
+    database_url: str
+    default_agent_slug: str
+    default_timezone: str
+    default_workspace_root: Path
+    scheduler_poll_interval_seconds: float
+    heartbeat_interval_seconds: float
+    stale_task_run_seconds: int
+    secret_backend: str
+    secret_service_name: str
+    default_model_provider: str
+    default_model_name: str
+    default_max_iterations_per_execution: int
+    default_daily_budget_usd: float
+    default_monthly_budget_usd: float
+    default_app_view: str
+    default_activity_poll_seconds: int
+
+    def ensure_data_dir(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_backend_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS"))
+    return Path(__file__).resolve().parents[2]
+
+
+def _build_settings() -> Settings:
+    backend_root = _resolve_backend_root()
+    data_dir = Path(os.getenv("APP_DATA_DIR", backend_root / "data"))
+    logs_dir = Path(os.getenv("APP_LOG_DIR", data_dir / "logs"))
+    artifacts_dir = Path(os.getenv("APP_ARTIFACTS_DIR", data_dir / "artifacts"))
+    database_url = os.getenv("DATABASE_URL")
+
+    if not database_url:
+        database_url = f"sqlite:///{data_dir / 'agent_os.db'}"
+
+    return Settings(
+        app_name="Nanobot Agent Backend",
+        app_version="0.2.0",
+        backend_root=backend_root,
+        data_dir=data_dir,
+        logs_dir=logs_dir,
+        artifacts_dir=artifacts_dir,
+        database_url=database_url,
+        default_agent_slug=os.getenv("DEFAULT_AGENT_SLUG", "main"),
+        default_timezone=os.getenv("APP_TIMEZONE", "UTC"),
+        default_workspace_root=Path(
+            os.getenv("APP_WORKSPACE_ROOT", backend_root.parents[1])
+        ).resolve(),
+        scheduler_poll_interval_seconds=float(
+            os.getenv("SCHEDULER_POLL_INTERVAL_SECONDS", "1.0")
+        ),
+        heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "60.0")),
+        stale_task_run_seconds=int(os.getenv("STALE_TASK_RUN_SECONDS", "900")),
+        secret_backend=os.getenv("APP_SECRET_BACKEND", "keychain"),
+        secret_service_name=os.getenv("APP_SECRET_SERVICE_NAME", "nanobot-agent-console"),
+        default_model_provider=os.getenv("DEFAULT_MODEL_PROVIDER", "product_echo"),
+        default_model_name=os.getenv("DEFAULT_MODEL_NAME", "product-echo/simple"),
+        default_max_iterations_per_execution=int(
+            os.getenv("DEFAULT_MAX_ITERATIONS_PER_EXECUTION", "2")
+        ),
+        default_daily_budget_usd=float(os.getenv("DEFAULT_DAILY_BUDGET_USD", "10")),
+        default_monthly_budget_usd=float(os.getenv("DEFAULT_MONTHLY_BUDGET_USD", "200")),
+        default_app_view=os.getenv("DEFAULT_APP_VIEW", "chat"),
+        default_activity_poll_seconds=int(os.getenv("DEFAULT_ACTIVITY_POLL_SECONDS", "3")),
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return _build_settings()
+
+
+def clear_settings_cache() -> None:
+    get_settings.cache_clear()
