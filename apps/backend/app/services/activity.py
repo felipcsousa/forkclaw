@@ -13,6 +13,7 @@ from app.schemas.activity import (
     ActivityTimelineItemRead,
     ActivityTimelineResponse,
 )
+from app.schemas.skill import SkillSummaryRead
 
 
 class ActivityService:
@@ -127,6 +128,7 @@ class ActivityService:
 
         entries.extend(self._audit_entries(audit_events))
         entries.sort(key=self._entry_sort_key)
+        skill_strategy, resolved_skills = self._skill_resolution(task_run.output_json)
 
         session_title = (
             session_record.title
@@ -147,6 +149,8 @@ class ActivityService:
             error_message=task_run.error_message,
             duration_ms=task_run.duration_ms,
             estimated_cost_usd=task_run.estimated_cost_usd,
+            skill_strategy=skill_strategy,
+            resolved_skills=resolved_skills,
             entries=entries,
             audit_log=[
                 ActivityAuditEventRead(
@@ -255,6 +259,31 @@ class ActivityService:
         if task_run.status == "failed":
             return "Execution failed."
         return f"Execution status: {task_run.status}."
+
+    @staticmethod
+    def _skill_resolution(output_json: str | None) -> tuple[str | None, list[SkillSummaryRead]]:
+        if not output_json:
+            return None, []
+        try:
+            payload = json.loads(output_json)
+        except json.JSONDecodeError:
+            return None, []
+        skills = payload.get("skills")
+        if not isinstance(skills, dict):
+            return None, []
+        strategy = skills.get("strategy")
+        items = skills.get("items")
+        if not isinstance(items, list):
+            return strategy if isinstance(strategy, str) else None, []
+        summaries: list[SkillSummaryRead] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("selected"):
+                continue
+            try:
+                summaries.append(SkillSummaryRead.model_validate(item))
+            except Exception:
+                continue
+        return strategy if isinstance(strategy, str) else None, summaries
 
     @staticmethod
     def _entry_sort_key(item: ActivityTimelineEntryRead) -> tuple[object, int, str]:

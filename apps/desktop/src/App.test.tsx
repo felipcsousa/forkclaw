@@ -27,6 +27,8 @@ const mockUpdateToolPolicy = vi.fn();
 const mockFetchToolPermissions = vi.fn();
 const mockFetchToolCalls = vi.fn();
 const mockUpdateToolPermission = vi.fn();
+const mockFetchSkills = vi.fn();
+const mockUpdateSkill = vi.fn();
 const mockFetchApprovals = vi.fn();
 const mockApproveApproval = vi.fn();
 const mockDenyApproval = vi.fn();
@@ -162,6 +164,36 @@ function makeToolPolicy(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeSkill(overrides: Record<string, unknown> = {}) {
+  return {
+    key: 'list-files-coach',
+    name: 'List Files Coach',
+    description: 'Guide filesystem listing.',
+    origin: 'workspace',
+    enabled: true,
+    eligible: true,
+    selected: true,
+    blocked_reasons: [],
+    config: null,
+    configured_env_keys: [],
+    primary_env: null,
+    ...overrides,
+  };
+}
+
+function makeSkillSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    key: 'list-files-coach',
+    name: 'List Files Coach',
+    origin: 'workspace',
+    source_path: '/workspace/skills/list-files-coach/SKILL.md',
+    selected: true,
+    eligible: true,
+    blocked_reasons: [],
+    ...overrides,
+  };
+}
+
 function makeCronJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 'job-1',
@@ -226,6 +258,8 @@ vi.mock('./lib/backend', () => ({
   fetchToolCalls: () => mockFetchToolCalls(),
   updateToolPermission: (toolName: string, level: string) =>
     mockUpdateToolPermission(toolName, level),
+  fetchSkills: () => mockFetchSkills(),
+  updateSkill: (skillKey: string, payload: unknown) => mockUpdateSkill(skillKey, payload),
   fetchApprovals: () => mockFetchApprovals(),
   approveApproval: (approvalId: string) => mockApproveApproval(approvalId),
   denyApproval: (approvalId: string) => mockDenyApproval(approvalId),
@@ -257,12 +291,16 @@ const agentConfig = {
   profile: {
     id: 'profile-1',
     display_name: 'Nanobot',
-    persona: 'calm precision',
-    system_prompt: 'Operate with calm precision.',
-    identity_text: 'You are the primary local-first agent.',
-    soul_text: 'Operate with calm precision.',
-    user_context_text: 'The user prefers short answers.',
-    policy_base_text: 'Require approval for sensitive actions.',
+    persona: 'Operate with precision, finish work end-to-end, and prefer evidence over guesses',
+    system_prompt:
+      'Operate with precision, finish work end-to-end, and prefer evidence over guesses.',
+    identity_text:
+      'You are the primary agent for this desktop product. Help directly, complete work end-to-end, and use tools when they materially help.',
+    soul_text:
+      'Operate with precision, finish work end-to-end, and prefer evidence over guesses.',
+    user_context_text: '',
+    policy_base_text:
+      'Respect explicit approvals for sensitive actions. Prefer auditable product state and do not treat markdown as canonical state.',
     model_provider: 'product_echo',
     model_name: 'product-echo/simple',
     status: 'active',
@@ -293,6 +331,10 @@ describe('App', () => {
       items: [makeToolPermission()],
     });
     mockFetchToolCalls.mockResolvedValue({ items: [] });
+    mockFetchSkills.mockResolvedValue({
+      strategy: 'all_eligible',
+      items: [makeSkill()],
+    });
     mockFetchApprovals.mockResolvedValue({ items: [] });
     mockFetchOperationalSettings.mockResolvedValue({
       provider: 'product_echo',
@@ -303,6 +345,7 @@ describe('App', () => {
       monthly_budget_usd: 200,
       default_view: 'chat',
       activity_poll_seconds: 3,
+      heartbeat_interval_seconds: 1800,
       provider_api_key_configured: false,
     });
     mockFetchActivityTimeline.mockResolvedValue({ items: [] });
@@ -581,7 +624,7 @@ describe('App', () => {
         description: 'Default single-agent instance.',
         identity_text: 'Act as a meticulous operator.',
         soul_text: 'Respond with exact calm.',
-        user_context_text: 'The user prefers short answers.',
+        user_context_text: '',
         policy_base_text: 'Always require explicit approval.',
         model_name: 'product-echo/tuned',
       }),
@@ -658,6 +701,63 @@ describe('App', () => {
     );
   });
 
+  it('shows the skills tab and toggles a skill enablement', async () => {
+    mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockFetchSkills.mockResolvedValueOnce({
+      strategy: 'all_eligible',
+      items: [
+        makeSkill({
+          key: 'special-helper',
+          name: 'Special Helper',
+          origin: 'user-local',
+          enabled: false,
+          eligible: false,
+          selected: false,
+          blocked_reasons: ['disabled'],
+        }),
+      ],
+    });
+    mockUpdateSkill.mockResolvedValueOnce(
+      makeSkill({
+        key: 'special-helper',
+        name: 'Special Helper',
+        origin: 'user-local',
+        enabled: true,
+        eligible: true,
+        selected: true,
+        blocked_reasons: [],
+      }),
+    );
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-sidebar-nav-tools')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-tools'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Skills' })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Special Helper')).toBeInTheDocument(),
+    );
+
+    expect(screen.getByText('user-local')).toBeInTheDocument();
+    expect(screen.getByText('disabled')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /enable special helper/i }));
+
+    await waitFor(() =>
+      expect(mockUpdateSkill).toHaveBeenCalledWith('special-helper', {
+        enabled: true,
+      }),
+    );
+  });
+
   it('updates operational settings and keeps secrets out of the UI response', async () => {
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
     mockUpdateOperationalSettings.mockResolvedValueOnce({
@@ -669,6 +769,7 @@ describe('App', () => {
       monthly_budget_usd: 10,
       default_view: 'activity',
       activity_poll_seconds: 5,
+      heartbeat_interval_seconds: 1800,
       provider_api_key_configured: true,
     });
 
@@ -708,6 +809,9 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText(/max iterations per execution/i), {
       target: { value: '1' },
     });
+    fireEvent.change(screen.getByLabelText(/heartbeat interval/i), {
+      target: { value: '1800' },
+    });
     fireEvent.click(screen.getByRole('tab', { name: 'Budgets' }));
     fireEvent.change(screen.getByLabelText(/daily budget/i), {
       target: { value: '0.5' },
@@ -731,6 +835,7 @@ describe('App', () => {
         monthly_budget_usd: 10,
         default_view: 'activity',
         activity_poll_seconds: 3,
+        heartbeat_interval_seconds: 1800,
         api_key: 'sk-secret',
         clear_api_key: false,
       }),
@@ -750,6 +855,7 @@ describe('App', () => {
       monthly_budget_usd: 200,
       default_view: 'chat',
       activity_poll_seconds: 3,
+      heartbeat_interval_seconds: 1800,
       provider_api_key_configured: false,
     });
 
@@ -797,6 +903,7 @@ describe('App', () => {
         monthly_budget_usd: 200,
         default_view: 'chat',
         activity_poll_seconds: 3,
+        heartbeat_interval_seconds: 1800,
         api_key: null,
         clear_api_key: false,
       }),
@@ -934,6 +1041,25 @@ describe('App', () => {
 
   it('renders activity timeline entries from the aggregated endpoint', async () => {
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockFetchToolCalls.mockResolvedValue({
+      items: [
+        {
+          id: 'call-1',
+          session_id: 'session-1',
+          message_id: 'message-1',
+          task_run_id: 'run-1',
+          tool_name: 'list_files',
+          status: 'completed',
+          input_json: '{"path":"."}',
+          output_json: '{"text":"file: notes.txt"}',
+          started_at: '2026-03-08T12:00:01Z',
+          finished_at: '2026-03-08T12:00:01Z',
+          created_at: '2026-03-08T12:00:01Z',
+          updated_at: '2026-03-08T12:00:01Z',
+          guided_by_skills: [makeSkillSummary()],
+        },
+      ],
+    });
     mockFetchActivityTimeline.mockResolvedValue({
       items: [
         {
@@ -949,6 +1075,8 @@ describe('App', () => {
           error_message: null,
           duration_ms: 2000,
           estimated_cost_usd: null,
+          skill_strategy: 'all_eligible',
+          resolved_skills: [makeSkillSummary()],
           entries: [
             {
               id: 'message:1',
@@ -1004,5 +1132,17 @@ describe('App', () => {
       expect(screen.getByText('hello timeline')).toBeInTheDocument(),
     );
     expect(screen.getByText('Tool call: list_files')).toBeInTheDocument();
+    expect(screen.getByText(/Guided by: List Files Coach/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-tools'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Recent calls' })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Recent calls' }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Guided by List Files Coach/i)).toBeInTheDocument(),
+    );
   });
 });

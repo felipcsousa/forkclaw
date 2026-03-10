@@ -71,6 +71,7 @@ function App() {
     handleSaveOperationalSettings,
     handleSelectSession,
     handleSendMessage,
+    handleToggleSkill,
     heartbeat,
     isActingOnApproval,
     isBootstrapping,
@@ -105,6 +106,8 @@ function App() {
     setDraft,
     setErrorMessage,
     setMobileNavOpen,
+    skills,
+    skillsStrategy,
     toolCalls,
     toolCatalog,
     toolPolicy,
@@ -173,10 +176,13 @@ function App() {
           workspaceRoot={workspaceRoot}
           permissions={toolPermissions}
           calls={toolCalls}
+          skills={skills}
+          skillsStrategy={skillsStrategy}
           isLoading={isLoadingTools}
           isUpdating={isUpdatingToolPermission}
           onChangeProfile={handleChangeToolPolicyProfile}
           onChangePermission={handleChangeToolPermission}
+          onToggleSkill={handleToggleSkill}
         />
       );
     }

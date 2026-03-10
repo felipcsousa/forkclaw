@@ -213,6 +213,27 @@ export function OperationalSettingsPanel({
                 />
               </Field>
             </div>
+            <Field
+              label="Heartbeat interval"
+              htmlFor={`${idBase}-heartbeat-seconds`}
+              hint="How often the backend heartbeat runs operational maintenance."
+            >
+              <Input
+                id={`${idBase}-heartbeat-seconds`}
+                type="number"
+                min={60}
+                max={86400}
+                value={draft.heartbeat_interval_seconds}
+                onChange={(e) =>
+                  onDraftChange(
+                    'heartbeat_interval_seconds',
+                    Number(e.target.value) || 60,
+                  )
+                }
+                disabled={disabled}
+                required
+              />
+            </Field>
           </TabsContent>
 
           <TabsContent value="budgets" className="space-y-6">

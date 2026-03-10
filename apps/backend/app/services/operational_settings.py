@@ -72,6 +72,12 @@ class OperationalSettingsService:
             value_text=str(payload.max_iterations_per_execution),
         )
         self.repository.upsert_setting(
+            scope="runtime",
+            key="heartbeat_interval_seconds",
+            value_type="integer",
+            value_text=str(payload.heartbeat_interval_seconds),
+        )
+        self.repository.upsert_setting(
             scope="budget",
             key="daily_usd",
             value_type="float",
@@ -126,6 +132,7 @@ class OperationalSettingsService:
                 "monthly_budget_usd": payload.monthly_budget_usd,
                 "default_view": payload.default_view,
                 "activity_poll_seconds": payload.activity_poll_seconds,
+                "heartbeat_interval_seconds": payload.heartbeat_interval_seconds,
                 "api_key_configured": bool(payload.api_key and provider != "product_echo"),
                 "api_key_cleared": payload.clear_api_key,
             },
@@ -266,6 +273,11 @@ class OperationalSettingsService:
                 "preferences",
                 "activity_poll_seconds",
                 settings.default_activity_poll_seconds,
+            ),
+            heartbeat_interval_seconds=self._get_int_setting(
+                "runtime",
+                "heartbeat_interval_seconds",
+                settings.default_heartbeat_interval_seconds,
             ),
             provider_api_key_configured=bool(
                 provider != "product_echo" and self.secret_store.get_provider_api_key(provider)

@@ -36,6 +36,7 @@ class OperationalSettingsRead(BaseModel):
     monthly_budget_usd: float
     default_view: AppViewName
     activity_poll_seconds: int
+    heartbeat_interval_seconds: int
     provider_api_key_configured: bool
 
 
@@ -48,6 +49,7 @@ class OperationalSettingsUpdate(BaseModel):
     monthly_budget_usd: float = Field(gt=0, le=10_000_000)
     default_view: AppViewName
     activity_poll_seconds: int = Field(ge=1, le=300)
+    heartbeat_interval_seconds: int = Field(ge=60, le=86_400)
     api_key: str | None = Field(default=None, max_length=4000)
     clear_api_key: bool = False
 

@@ -12,6 +12,7 @@ from app.repositories.tools import ToolingRepository
 from app.schemas.approval import ApprovalActionResponse, ApprovalRead
 from app.services.agent_execution import AgentExecutionService
 from app.services.tools import ToolService
+from app.skills.runtime import runtime_env_overlay
 
 
 class ApprovalService:
@@ -75,46 +76,52 @@ class ApprovalService:
             input_text=message.content_text,
             history_cutoff_sequence=message.sequence_number,
         )
-
-        tool_outcome = self.tool_service.continue_approved_tool_call(
+        self.execution_service.record_skill_resolution(
+            agent_id=approval.agent_id,
+            task_run_id=bundle.task_run.id,
             request=request,
-            tool_call_id=bundle.tool_call.id,
         )
 
-        if tool_outcome.status == "failed":
-            result = KernelExecutionResult(
-                status="failed",
-                output_text=tool_outcome.output_text,
-                finish_reason="tool_error",
-                kernel_name="nanobot",
-                model_name=request.soul.model_name,
-                tools_used=[bundle.tool_call.tool_name],
-                raw_payload=json.dumps(
-                    {
-                        "tool_name": bundle.tool_call.tool_name,
-                        "tool_call_id": bundle.tool_call.id,
-                        "tool_status": tool_outcome.status,
-                        "error_message": tool_outcome.error_message,
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-        else:
-            tool_arguments = {}
-            if bundle.tool_call.input_json:
-                try:
-                    parsed_arguments = json.loads(bundle.tool_call.input_json)
-                except json.JSONDecodeError:
-                    parsed_arguments = {}
-                if isinstance(parsed_arguments, dict):
-                    tool_arguments = parsed_arguments
-            result = self._resume_kernel(
+        with runtime_env_overlay(request.runtime.environment_overlay):
+            tool_outcome = self.tool_service.continue_approved_tool_call(
                 request=request,
-                tool_name=bundle.tool_call.tool_name,
                 tool_call_id=bundle.tool_call.id,
-                tool_arguments=tool_arguments,
-                tool_output=tool_outcome.output_text,
             )
+
+            if tool_outcome.status == "failed":
+                result = KernelExecutionResult(
+                    status="failed",
+                    output_text=tool_outcome.output_text,
+                    finish_reason="tool_error",
+                    kernel_name="nanobot",
+                    model_name=request.soul.model_name,
+                    tools_used=[bundle.tool_call.tool_name],
+                    raw_payload=json.dumps(
+                        {
+                            "tool_name": bundle.tool_call.tool_name,
+                            "tool_call_id": bundle.tool_call.id,
+                            "tool_status": tool_outcome.status,
+                            "error_message": tool_outcome.error_message,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            else:
+                tool_arguments = {}
+                if bundle.tool_call.input_json:
+                    try:
+                        parsed_arguments = json.loads(bundle.tool_call.input_json)
+                    except json.JSONDecodeError:
+                        parsed_arguments = {}
+                    if isinstance(parsed_arguments, dict):
+                        tool_arguments = parsed_arguments
+                result = self._resume_kernel(
+                    request=request,
+                    tool_name=bundle.tool_call.tool_name,
+                    tool_call_id=bundle.tool_call.id,
+                    tool_arguments=tool_arguments,
+                    tool_output=tool_outcome.output_text,
+                )
 
         assistant_message = self.execution_service.repository.create_message(
             bundle.session.id,
@@ -127,6 +134,7 @@ class ApprovalService:
             task=bundle.task,
             task_run=bundle.task_run,
             session_id=bundle.session.id,
+            request=request,
             result=result,
         )
 

@@ -9,7 +9,7 @@ import pytest
 from nanobot.providers import LiteLLMProvider
 
 from app.adapters.kernel.kimi_coding import KimiCodingProvider
-from app.adapters.kernel.nanobot import NanobotKernelAdapter
+from app.adapters.kernel.nanobot import NanobotKernelAdapter, NanobotPromptBuilder
 from app.adapters.kernel.provider_factory import build_provider
 from app.core.config import clear_settings_cache
 from app.core.secrets import clear_secret_store_cache, get_secret_store
@@ -19,6 +19,9 @@ from app.kernel.contracts import (
     KernelMessage,
     KernelRuntime,
     KernelSessionState,
+    KernelSkill,
+    KernelSkillResolution,
+    KernelSkillSummary,
     KernelSoul,
     KernelToolPolicy,
 )
@@ -30,6 +33,8 @@ def _build_request(
     *,
     provider: str,
     model_name: str,
+    skills: list[KernelSkill] | None = None,
+    skill_resolution: KernelSkillResolution | None = None,
     tools: list[KernelToolPolicy] | None = None,
     history: list[KernelMessage] | None = None,
     input_text: str = "hello",
@@ -49,7 +54,7 @@ def _build_request(
             model_provider=provider,
             model_name=model_name,
         ),
-        skills=[],
+        skills=skills or [],
         tools=tools or [],
         session=KernelSessionState(
             session_id="session-1",
@@ -61,6 +66,8 @@ def _build_request(
             task_id="task-1",
             task_run_id="run-1",
             trigger_message_id=None,
+            skill_resolution=skill_resolution
+            or KernelSkillResolution(strategy="all_eligible", items=[]),
             settings={},
             started_at=datetime.now(UTC),
         ),
@@ -165,6 +172,69 @@ def _clear_secret_state(monkeypatch: pytest.MonkeyPatch) -> None:
     yield
     clear_settings_cache()
     clear_secret_store_cache()
+
+
+def test_prompt_builder_renders_sorted_skill_block_with_strategy_and_config() -> None:
+    prompt = NanobotPromptBuilder.build_system_prompt(
+        _build_request(
+            provider="product_echo",
+            model_name="product-echo/simple",
+            skills=[
+                KernelSkill(
+                    key="zebra-skill",
+                    name="Zebra Skill",
+                    description="Later alphabetically.",
+                    origin="workspace",
+                    source_path="/tmp/zebra/SKILL.md",
+                    content="Use zebra behavior.",
+                    config=None,
+                ),
+                KernelSkill(
+                    key="alpha-skill",
+                    name="Alpha Skill",
+                    description="Earlier alphabetically.",
+                    origin="bundled",
+                    source_path="/tmp/alpha/SKILL.md",
+                    content="Use alpha behavior.",
+                    config={"mode": "strict"},
+                ),
+            ],
+        )
+    )
+
+    alpha_index = prompt.index("## Alpha Skill")
+    zebra_index = prompt.index("## Zebra Skill")
+
+    assert "# Skills" in prompt
+    assert "Strategy: all_eligible" in prompt
+    assert alpha_index < zebra_index
+    assert "Config: {\"mode\": \"strict\"}" in prompt
+
+
+def test_prompt_builder_reports_absence_of_selected_skills_but_keeps_resolution_summary() -> None:
+    request = _build_request(
+        provider="product_echo",
+        model_name="product-echo/simple",
+        skill_resolution=KernelSkillResolution(
+            strategy="all_eligible",
+            items=[
+                KernelSkillSummary(
+                    key="blocked-skill",
+                    name="Blocked Skill",
+                    origin="workspace",
+                    source_path="/tmp/blocked/SKILL.md",
+                    selected=False,
+                    eligible=False,
+                    blocked_reasons=["missing_env"],
+                )
+            ],
+        ),
+    )
+
+    prompt = NanobotPromptBuilder.build_system_prompt(request)
+
+    assert "Strategy: all_eligible" in prompt
+    assert "No eligible skills are active for this execution." in prompt
 
 
 def test_build_provider_uses_native_kimi_provider() -> None:

@@ -18,7 +18,6 @@ from app.kernel.contracts import (
     KernelExecutionRequest,
     KernelExecutionResult,
     KernelMessage,
-    KernelSkill,
     KernelToolPolicy,
 )
 from app.tools.base import ToolExecutionPort
@@ -113,7 +112,7 @@ class NanobotPromptBuilder:
             f"# Soul\n{request.soul.soul_text or '(none)'}",
             f"# User Context\n{request.soul.user_context_text or '(none)'}",
             f"# Base Policy\n{request.soul.policy_base_text or '(none)'}",
-            NanobotPromptBuilder._skills_section(request.skills),
+            NanobotPromptBuilder._skills_section(request),
             NanobotPromptBuilder._tools_section(request.tools),
             NanobotPromptBuilder._runtime_section(request),
         ]
@@ -142,13 +141,26 @@ class NanobotPromptBuilder:
         return payload
 
     @staticmethod
-    def _skills_section(skills: list[KernelSkill]) -> str:
-        if not skills:
-            return "# Skills\nNo product skills are active for this execution."
+    def _skills_section(request: KernelExecutionRequest) -> str:
+        lines = ["# Skills", f"Strategy: {request.runtime.skill_resolution.strategy}"]
+        sorted_skills = sorted(request.skills, key=lambda skill: skill.key)
+        if not sorted_skills:
+            lines.append("No eligible skills are active for this execution.")
+            return "\n".join(lines)
 
-        lines = ["# Skills"]
-        for skill in skills:
-            lines.append(f"## {skill.name}\n{skill.content}")
+        for skill in sorted_skills:
+            lines.append(f"## {skill.name}")
+            lines.append(f"Key: {skill.key}")
+            lines.append(f"Origin: {skill.origin}")
+            lines.append(f"Description: {skill.description}")
+            if skill.config:
+                config_json = json.dumps(
+                    skill.config,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                lines.append(f"Config: {config_json}")
+            lines.append(skill.content)
         return "\n\n".join(lines)
 
     @staticmethod
