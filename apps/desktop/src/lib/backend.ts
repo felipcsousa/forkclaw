@@ -94,7 +94,38 @@ export type OperationalProvider =
   | 'anthropic'
   | 'openrouter'
   | 'deepseek'
-  | 'gemini';
+  | 'gemini'
+  | 'kimi-coding';
+
+const OPERATIONAL_PROVIDER_LABELS: Record<OperationalProvider, string> = {
+  product_echo: 'Product Echo (local fallback)',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  'kimi-coding': 'Kimi for Coding',
+};
+
+const OPERATIONAL_PROVIDER_SUGGESTED_MODELS: Partial<Record<OperationalProvider, string>> = {
+  product_echo: 'product-echo/simple',
+  'kimi-coding': 'k2p5',
+};
+
+export function getOperationalProviderLabel(
+  provider: OperationalProvider | string | null | undefined,
+): string {
+  if (!provider) {
+    return 'product_echo';
+  }
+  return OPERATIONAL_PROVIDER_LABELS[provider as OperationalProvider] || provider;
+}
+
+export function getOperationalProviderSuggestedModel(
+  provider: OperationalProvider,
+): string | null {
+  return OPERATIONAL_PROVIDER_SUGGESTED_MODELS[provider] || null;
+}
 
 export type OperationalDefaultView =
   | 'chat'

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
 import shlex
 from typing import Any
 from uuid import uuid4
 
-from nanobot.providers import LiteLLMProvider
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
-from app.core.secrets import get_secret_store
+from app.adapters.kernel.provider_factory import (
+    build_provider,
+    missing_api_key_message,
+    resolve_provider_api_key,
+    resolve_provider_name,
+)
 from app.kernel.contracts import (
     AgentKernelPort,
     KernelExecutionRequest,
@@ -187,11 +190,13 @@ class NanobotKernelAdapter(AgentKernelPort):
         self.tool_executor = tool_executor
 
     async def execute(self, request: KernelExecutionRequest) -> KernelExecutionResult:
-        provider = self._build_provider(request)
+        resolved_provider = self._resolve_provider(request)
+        provider = resolved_provider.provider
         model_name = request.soul.model_name or provider.get_default_model()
         messages = NanobotPromptBuilder.build_messages(request)
         return await self._execute_messages(
             request=request,
+            tool_format=resolved_provider.tool_format,
             provider=provider,
             model_name=model_name,
             messages=messages,
@@ -203,12 +208,19 @@ class NanobotKernelAdapter(AgentKernelPort):
         *,
         tool_name: str,
         tool_call_id: str,
+        tool_arguments: dict[str, object] | None = None,
         tool_output: str,
     ) -> KernelExecutionResult:
-        provider = self._build_provider(request)
+        resolved_provider = self._resolve_provider(request)
+        provider = resolved_provider.provider
         model_name = request.soul.model_name or provider.get_default_model()
         messages = [
             *NanobotPromptBuilder.build_messages(request),
+            _assistant_tool_call_message(
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                arguments=tool_arguments or {},
+            ),
             {
                 "role": "tool",
                 "name": tool_name,
@@ -218,6 +230,7 @@ class NanobotKernelAdapter(AgentKernelPort):
         ]
         return await self._execute_messages(
             request=request,
+            tool_format=resolved_provider.tool_format,
             provider=provider,
             model_name=model_name,
             messages=messages,
@@ -228,13 +241,17 @@ class NanobotKernelAdapter(AgentKernelPort):
         self,
         *,
         request: KernelExecutionRequest,
+        tool_format: str,
         provider: LLMProvider,
         model_name: str,
         messages: list[dict[str, Any]],
         available_tools: list[dict[str, Any]] | None = None,
     ) -> KernelExecutionResult:
         available_tools = (
-            self.tool_executor.describe_tools([tool.tool_name for tool in request.tools])
+            self.tool_executor.describe_tools(
+                [tool.tool_name for tool in request.tools],
+                format=tool_format,
+            )
             if self.tool_executor is not None
             and available_tools is None
             else None
@@ -254,6 +271,14 @@ class NanobotKernelAdapter(AgentKernelPort):
             "initial_finish_reason": response.finish_reason,
             "usage": response.usage,
             "tools_used": tools_used,
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                }
+                for tool_call in tool_calls
+            ],
         }
         execution_status = "completed"
         pending_approval_id: str | None = None
@@ -270,7 +295,9 @@ class NanobotKernelAdapter(AgentKernelPort):
                 )
                 tool_outcomes.append(
                     {
+                        "tool_call_id": tool_call.id,
                         "tool_name": outcome.tool_name,
+                        "arguments": tool_call.arguments,
                         "status": outcome.status,
                         "approval_id": outcome.approval_id,
                         "error_message": outcome.error_message,
@@ -283,6 +310,13 @@ class NanobotKernelAdapter(AgentKernelPort):
                 elif outcome.status == "failed":
                     execution_status = "failed"
                 tool_messages.append(
+                    _assistant_tool_call_message(
+                        tool_name=tool_call.name,
+                        tool_call_id=tool_call.id,
+                        arguments=tool_call.arguments,
+                    )
+                )
+                tool_messages.append(
                     {
                         "role": "tool",
                         "name": tool_call.name,
@@ -293,6 +327,7 @@ class NanobotKernelAdapter(AgentKernelPort):
 
             raw_payload_data["tool_outcomes"] = tool_outcomes
             if max_iterations > 1:
+                raw_payload_data["follow_up_messages"] = tool_messages
                 follow_up = await provider.chat(
                     messages=[*messages, *tool_messages],
                     tools=None,
@@ -303,6 +338,7 @@ class NanobotKernelAdapter(AgentKernelPort):
                 )
                 output_text = (follow_up.content or "").strip()
                 raw_payload_data["follow_up_finish_reason"] = follow_up.finish_reason
+                raw_payload_data["follow_up_usage"] = follow_up.usage
             elif tool_messages:
                 output_text = str(tool_messages[-1]["content"]).strip()
                 raw_payload_data["follow_up_skipped"] = "max_iterations_reached"
@@ -329,60 +365,41 @@ class NanobotKernelAdapter(AgentKernelPort):
             pending_tool_call_id=pending_tool_call_id,
         )
 
-    def _build_provider(self, request: KernelExecutionRequest) -> LLMProvider:
-        provider_name = (request.soul.model_provider or "").strip()
+    def _resolve_provider(self, request: KernelExecutionRequest):
+        provider_name = resolve_provider_name(request.soul.model_provider)
         model_name = (request.soul.model_name or "").strip()
-        api_key = self._resolve_api_key(provider_name)
-
         if provider_name and provider_name != "product_echo":
             if not model_name:
                 msg = f"Provider `{provider_name}` is configured without a model name."
                 raise ValueError(msg)
-            if not api_key:
-                msg = (
-                    f"Provider `{provider_name}` is configured but no API key is stored "
-                    "in the system keychain."
-                )
-                raise ValueError(msg)
-            return LiteLLMProvider(
-                api_key=api_key,
-                api_base=os.getenv("NANOBOT_API_BASE"),
-                default_model=model_name,
-                provider_name=provider_name,
-            )
-
-        return ProductEchoLLMProvider(
-            agent_name=request.identity.name,
-            identity_text=request.identity.identity_text,
-            soul_text=request.soul.soul_text,
-            user_context_text=request.soul.user_context_text,
-            policy_base_text=request.soul.policy_base_text,
+        return build_provider(
+            provider_name=provider_name,
+            model_name=model_name or ProductEchoLLMProvider(
+                agent_name=request.identity.name,
+                identity_text=request.identity.identity_text,
+                soul_text=request.soul.soul_text,
+                user_context_text=request.soul.user_context_text,
+                policy_base_text=request.soul.policy_base_text,
+            ).get_default_model(),
+            product_echo_factory=lambda: ProductEchoLLMProvider(
+                agent_name=request.identity.name,
+                identity_text=request.identity.identity_text,
+                soul_text=request.soul.soul_text,
+                user_context_text=request.soul.user_context_text,
+                policy_base_text=request.soul.policy_base_text,
+            ),
         )
+
+    def _build_provider(self, request: KernelExecutionRequest) -> LLMProvider:
+        return self._resolve_provider(request).provider
 
     @staticmethod
     def _resolve_api_key(provider_name: str) -> str | None:
-        if not provider_name:
-            return None
+        return resolve_provider_api_key(provider_name)
 
-        if provider_name != "product_echo":
-            secret_value = get_secret_store().get_provider_api_key(provider_name)
-            if secret_value:
-                return secret_value
-
-        candidates = {
-            "openai": ["OPENAI_API_KEY"],
-            "anthropic": ["ANTHROPIC_API_KEY"],
-            "openrouter": ["OPENROUTER_API_KEY"],
-            "deepseek": ["DEEPSEEK_API_KEY"],
-            "gemini": ["GEMINI_API_KEY"],
-        }.get(provider_name, [])
-
-        for name in ("NANOBOT_API_KEY", *candidates):
-            value = os.getenv(name)
-            if value:
-                return value
-
-        return None
+    @staticmethod
+    def _missing_api_key_message(provider_name: str) -> str:
+        return missing_api_key_message(provider_name)
 
     @staticmethod
     def _resolve_max_iterations(request: KernelExecutionRequest) -> int:
@@ -393,6 +410,28 @@ class NanobotKernelAdapter(AgentKernelPort):
             return max(int(raw_value), 1)
         except ValueError:
             return 2
+
+
+def _assistant_tool_call_message(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        ],
+    }
 
 
 def _parse_tool_directive(latest_user: str) -> ToolCallRequest | None:

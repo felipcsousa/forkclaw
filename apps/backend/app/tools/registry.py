@@ -4,6 +4,7 @@ import platform
 import subprocess
 from typing import Any
 
+from app.core.provider_catalog import ToolFormat
 from app.tools.base import LocalTool, ToolDescriptor, ToolExecutionContext, ToolResult
 
 
@@ -244,11 +245,25 @@ class ToolRegistry:
     def list(self) -> list[LocalTool]:
         return [self._tools[name] for name in sorted(self._tools)]
 
-    def describe(self, tool_names: list[str] | None = None) -> list[dict[str, Any]]:
+    def describe(
+        self,
+        tool_names: list[str] | None = None,
+        *,
+        format: ToolFormat = "openai",
+    ) -> list[dict[str, Any]]:
         names = tool_names or sorted(self._tools)
         items = []
         for name in names:
             tool = self.get(name)
+            if format == "anthropic":
+                items.append(
+                    {
+                        "name": tool.descriptor.name,
+                        "description": tool.descriptor.description,
+                        "input_schema": tool.descriptor.parameters,
+                    }
+                )
+                continue
             items.append(
                 {
                     "type": "function",

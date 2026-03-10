@@ -7,6 +7,7 @@ import keyring
 from keyring.errors import KeyringError, NoKeyringError
 
 from app.core.config import get_settings
+from app.core.provider_catalog import normalize_provider_id
 
 
 class SecretStoreError(RuntimeError):
@@ -29,6 +30,7 @@ class KeychainSecretStore:
         self.service_name = service_name
 
     def get_provider_api_key(self, provider: str) -> str | None:
+        provider = normalize_provider_id(provider)
         try:
             return keyring.get_password(self.service_name, self._account_name(provider))
         except (KeyringError, NoKeyringError) as exc:
@@ -37,6 +39,7 @@ class KeychainSecretStore:
             ) from exc
 
     def set_provider_api_key(self, provider: str, value: str) -> None:
+        provider = normalize_provider_id(provider)
         try:
             keyring.set_password(self.service_name, self._account_name(provider), value)
         except (KeyringError, NoKeyringError) as exc:
@@ -45,6 +48,7 @@ class KeychainSecretStore:
             ) from exc
 
     def delete_provider_api_key(self, provider: str) -> None:
+        provider = normalize_provider_id(provider)
         try:
             keyring.delete_password(self.service_name, self._account_name(provider))
         except keyring.errors.PasswordDeleteError:
@@ -64,12 +68,15 @@ class MemorySecretStore:
         self._values: dict[str, str] = {}
 
     def get_provider_api_key(self, provider: str) -> str | None:
+        provider = normalize_provider_id(provider)
         return self._values.get(provider)
 
     def set_provider_api_key(self, provider: str, value: str) -> None:
+        provider = normalize_provider_id(provider)
         self._values[provider] = value
 
     def delete_provider_api_key(self, provider: str) -> None:
+        provider = normalize_provider_id(provider)
         self._values.pop(provider, None)
 
 

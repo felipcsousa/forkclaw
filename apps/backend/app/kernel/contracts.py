@@ -98,6 +98,7 @@ class AgentKernelPort(Protocol):
         *,
         tool_name: str,
         tool_call_id: str,
+        tool_arguments: dict[str, object] | None = None,
         tool_output: str,
     ) -> KernelExecutionResult:
         """Resume a paused execution after a tool result is available."""

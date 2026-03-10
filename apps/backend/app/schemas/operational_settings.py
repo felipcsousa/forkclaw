@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.provider_catalog import normalize_provider_id
 
 ProviderName = Literal[
     "product_echo",
@@ -11,6 +13,7 @@ ProviderName = Literal[
     "openrouter",
     "deepseek",
     "gemini",
+    "kimi-coding",
 ]
 
 AppViewName = Literal[
@@ -47,3 +50,8 @@ class OperationalSettingsUpdate(BaseModel):
     activity_poll_seconds: int = Field(ge=1, le=300)
     api_key: str | None = Field(default=None, max_length=4000)
     clear_api_key: bool = False
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        return normalize_provider_id(value)
