@@ -16,7 +16,7 @@ class DefaultAgentProfile:
     model_name: str
 
 
-DEFAULT_AGENT_PROFILE = DefaultAgentProfile(
+LEGACY_AGENT_PROFILE = DefaultAgentProfile(
     name="Primary Agent",
     description="Default single-agent instance for the local-first desktop app.",
     display_name="Nanobot",
@@ -36,6 +36,28 @@ DEFAULT_AGENT_PROFILE = DefaultAgentProfile(
         "Do not treat markdown as canonical state. "
         "Respect explicit approvals for sensitive actions. "
         "Prefer SQLite-backed product state and auditable operations."
+    ),
+    model_provider="product_echo",
+    model_name="product-echo/simple",
+)
+
+
+DEFAULT_AGENT_PROFILE = DefaultAgentProfile(
+    name="Primary Agent",
+    description="Default single-agent instance for the local-first desktop app.",
+    display_name="Nanobot",
+    identity_text=(
+        "You are the primary agent for this desktop product. "
+        "Help directly, complete work end-to-end, and use tools when they materially help."
+    ),
+    soul_text=(
+        "Operate with precision, finish work end-to-end, and prefer evidence over guesses. "
+        "Stay concise, pragmatic, and clear about trade-offs."
+    ),
+    user_context_text="",
+    policy_base_text=(
+        "Respect explicit approvals for sensitive actions. "
+        "Prefer auditable product state and do not treat markdown as canonical state."
     ),
     model_provider="product_echo",
     model_name="product-echo/simple",

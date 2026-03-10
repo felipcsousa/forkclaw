@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import os
-
 import httpx
 
 from app.core.config import get_settings
+from app.skills.runtime import runtime_env
 from app.tools.web.providers.base import SearchProviderResponse, SearchResultItem
 
 _BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
@@ -19,7 +18,7 @@ class BraveWebSearchProvider:
         api_key: str | None = None,
         timeout_seconds: float | None = None,
     ):
-        self.api_key = (api_key or os.getenv("BRAVE_API_KEY", "")).strip()
+        self.api_key = (api_key or runtime_env("BRAVE_API_KEY", "") or "").strip()
         if not self.api_key:
             msg = "BRAVE_API_KEY is required to use web_search."
             raise ValueError(msg)

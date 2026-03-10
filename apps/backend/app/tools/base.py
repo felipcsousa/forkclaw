@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol
+from typing import Any, Literal, Protocol
 
 from nanobot.providers.base import ToolCallRequest
 

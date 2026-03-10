@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import platform
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -7,6 +9,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
+from app.core.agent_profile_defaults import LEGACY_AGENT_PROFILE
+from app.db.seed import seed_default_data
 from app.db.session import get_db_session
 from app.models.entities import (
     Agent,
@@ -66,6 +70,37 @@ def _wait_for(predicate, *, timeout: float = 2.5, interval: float = 0.1):
     return predicate()
 
 
+def _write_skill(
+    root: Path,
+    directory: str,
+    *,
+    name: str,
+    description: str,
+    metadata: str,
+    body: str,
+    enabled: str | None = None,
+) -> Path:
+    skill_dir = root / directory
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "---",
+        f"name: {name}",
+        f"description: {description}",
+    ]
+    if enabled is not None:
+        lines.append(f"enabled: {enabled}")
+    lines.extend(
+        [
+            f"metadata: {metadata}",
+            "---",
+            body,
+        ]
+    )
+    path = skill_dir / "SKILL.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def test_health_check_returns_ok_payload(test_client: TestClient) -> None:
     response = test_client.get("/health")
 
@@ -87,8 +122,9 @@ def test_get_agent_returns_seeded_default_agent(test_client: TestClient) -> None
     assert payload["slug"] == "main"
     assert payload["is_default"] is True
     assert payload["profile"]["display_name"] == "Nanobot"
-    assert "local-first agent" in payload["profile"]["identity_text"]
-    assert "explicit approvals" in payload["profile"]["policy_base_text"]
+    assert "complete work end-to-end" in payload["profile"]["identity_text"]
+    assert payload["profile"]["user_context_text"] == ""
+    assert "auditable product state" in payload["profile"]["policy_base_text"]
 
 
 def test_sessions_are_persisted_in_sqlite(test_client: TestClient) -> None:
@@ -124,6 +160,181 @@ def test_settings_return_seeded_rows(test_client: TestClient) -> None:
     assert ("security", "approval_mode") in keys
 
 
+def test_skills_endpoint_lists_precedence_and_blocked_reasons(
+    test_client: TestClient,
+) -> None:
+    workspace_root = Path(test_client.get("/settings/operational").json()["workspace_root"])
+    fixture_root = workspace_root.parent
+    bundled_root = fixture_root / "bundled-skills"
+    user_root = fixture_root / ".forkclaw" / "skills"
+    workspace_skills_root = workspace_root / "skills"
+
+    _write_skill(
+        bundled_root,
+        "review",
+        name="Code Review",
+        description="Bundled",
+        metadata='{"forkclaw":{"requires":{"tools":["read_file"]}}}',
+        body="Bundled body",
+    )
+    _write_skill(
+        user_root,
+        "review",
+        name="Code Review",
+        description="User",
+        metadata='{"forkclaw":{"requires":{"tools":["read_file"]}}}',
+        body="User body",
+    )
+    _write_skill(
+        workspace_skills_root,
+        "review",
+        name="Code Review",
+        description="Workspace",
+        metadata='{"forkclaw":{"requires":{"tools":["read_file"]}}}',
+        body="Workspace body",
+    )
+    _write_skill(
+        workspace_skills_root,
+        "darwin-only",
+        name="Darwin Helper",
+        description="Only for macOS",
+        metadata=json.dumps(
+            {
+                "forkclaw": {
+                    "os": [
+                        "windows"
+                        if platform.system().lower() != "windows"
+                        else "linux"
+                    ]
+                }
+            }
+        ),
+        body="macOS only",
+    )
+    _write_skill(
+        workspace_skills_root,
+        "needs-env",
+        name="Needs Env",
+        description="Requires env",
+        metadata='{"forkclaw":{"requires":{"env":["SPECIAL_TOKEN"]}}}',
+        body="token required",
+    )
+
+    response = test_client.get("/skills")
+    assert response.status_code == 200
+
+    payload = response.json()
+    items = {item["key"]: item for item in payload["items"]}
+
+    assert payload["strategy"] == "all_eligible"
+    assert items["code-review"]["origin"] == "workspace"
+    assert items["code-review"]["selected"] is True
+    assert items["darwin-helper"]["eligible"] is False
+    assert items["darwin-helper"]["blocked_reasons"] == ["unsupported_os"]
+    assert items["needs-env"]["eligible"] is False
+    assert items["needs-env"]["blocked_reasons"] == ["missing_env"]
+
+
+def test_updating_skill_config_redacts_secrets_and_enables_selection(
+    test_client: TestClient,
+) -> None:
+    workspace_root = Path(test_client.get("/settings/operational").json()["workspace_root"])
+    workspace_skills_root = workspace_root / "skills"
+    _write_skill(
+        workspace_skills_root,
+        "special-helper",
+        name="Special Helper",
+        description="Needs a primary env",
+        metadata='{"forkclaw":{"primaryEnv":"SPECIAL_TOKEN","requires":{"env":["SPECIAL_TOKEN"]}}}',
+        body="Use SPECIAL_TOKEN if present.",
+    )
+
+    before = test_client.get("/skills")
+    assert before.status_code == 200
+    before_item = next(item for item in before.json()["items"] if item["key"] == "special-helper")
+    assert before_item["selected"] is False
+    assert before_item["blocked_reasons"] == ["missing_env"]
+
+    update_response = test_client.put(
+        "/skills/special-helper",
+        json={
+            "enabled": True,
+            "config": {"mode": "strict"},
+            "api_key": "super-secret",
+        },
+    )
+    assert update_response.status_code == 200
+    update_item = update_response.json()
+
+    assert update_item["selected"] is True
+    assert update_item["config"] == {"mode": "strict"}
+    assert "super-secret" not in update_response.text
+
+    settings_response = test_client.get("/settings")
+    settings_items = settings_response.json()["items"]
+    config_row = next(
+        item
+        for item in settings_items
+        if item["scope"] == "skills.entries.special-helper" and item["key"] == "config"
+    )
+    env_keys_row = next(
+        item
+        for item in settings_items
+        if item["scope"] == "skills.entries.special-helper" and item["key"] == "env_keys"
+    )
+    assert config_row["value_json"] == '{"mode":"strict"}'
+    assert env_keys_row["value_json"] == '["SPECIAL_TOKEN"]'
+
+
+def test_agent_execution_persists_resolved_skills_metadata_and_exposes_it(
+    test_client: TestClient,
+) -> None:
+    workspace_root = Path(test_client.get("/settings/operational").json()["workspace_root"])
+    workspace_skills_root = workspace_root / "skills"
+    _write_skill(
+        workspace_skills_root,
+        "list-files-coach",
+        name="List Files Coach",
+        description="Guide filesystem listing",
+        metadata='{"forkclaw":{"requires":{"tools":["list_files"]}}}',
+        body="Prefer shallow listings first.",
+    )
+
+    permission_response = test_client.put(
+        "/tools/permissions/list_files",
+        json={"permission_level": "allow"},
+    )
+    assert permission_response.status_code == 200
+
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={"title": "Skill Session", "message": "tool:list_files path=."},
+    )
+    assert execute_response.status_code == 201
+    task_run_id = execute_response.json()["task_run_id"]
+
+    with get_db_session() as session:
+        task_run = session.exec(select(TaskRun).where(TaskRun.id == task_run_id)).one()
+
+    assert task_run.output_json is not None
+    task_run_payload = json.loads(task_run.output_json)
+    assert task_run_payload["skills"]["strategy"] == "all_eligible"
+    assert task_run_payload["skills"]["items"][0]["key"] == "list-files-coach"
+
+    tool_calls_response = test_client.get("/tools/calls")
+    assert tool_calls_response.status_code == 200
+    tool_call = tool_calls_response.json()["items"][0]
+    assert tool_call["guided_by_skills"][0]["key"] == "list-files-coach"
+
+    activity_response = test_client.get("/activity/timeline")
+    assert activity_response.status_code == 200
+    activity_item = next(
+        item for item in activity_response.json()["items"] if item["task_run_id"] == task_run_id
+    )
+    assert activity_item["skill_strategy"] == "all_eligible"
+    assert activity_item["resolved_skills"][0]["key"] == "list-files-coach"
+
+
 def test_operational_settings_round_trip_and_sync_workspace(
     test_client: TestClient,
 ) -> None:
@@ -150,6 +361,7 @@ def test_operational_settings_round_trip_and_sync_workspace(
             "monthly_budget_usd": 10,
             "default_view": "activity",
             "activity_poll_seconds": 5,
+            "heartbeat_interval_seconds": 1800,
             "api_key": "sk-test",
             "clear_api_key": False,
         },
@@ -160,6 +372,7 @@ def test_operational_settings_round_trip_and_sync_workspace(
     assert payload["provider"] == "openai"
     assert payload["model_name"] == "gpt-4o-mini"
     assert payload["workspace_root"] == str(new_workspace)
+    assert payload["heartbeat_interval_seconds"] == 1800
     assert payload["provider_api_key_configured"] is True
 
     with get_db_session() as session:
@@ -202,6 +415,7 @@ def test_operational_settings_accepts_kimi_alias_and_persists_canonical_provider
             "monthly_budget_usd": 200,
             "default_view": "chat",
             "activity_poll_seconds": 3,
+            "heartbeat_interval_seconds": 1800,
             "api_key": "kimi-secret",
             "clear_api_key": False,
         },
@@ -278,6 +492,7 @@ def test_operational_settings_accepts_canonical_kimi_provider(
             "monthly_budget_usd": 200,
             "default_view": "settings",
             "activity_poll_seconds": 4,
+            "heartbeat_interval_seconds": 1200,
             "api_key": None,
             "clear_api_key": False,
         },
@@ -287,6 +502,7 @@ def test_operational_settings_accepts_canonical_kimi_provider(
     payload = response.json()
     assert payload["provider"] == "kimi-coding"
     assert payload["model_name"] == "k2p5"
+    assert payload["heartbeat_interval_seconds"] == 1200
 
 
 def test_budget_limit_blocks_new_execution(test_client: TestClient) -> None:
@@ -302,6 +518,7 @@ def test_budget_limit_blocks_new_execution(test_client: TestClient) -> None:
             "monthly_budget_usd": 0.000001,
             "default_view": "chat",
             "activity_poll_seconds": 3,
+            "heartbeat_interval_seconds": 1800,
             "api_key": None,
             "clear_api_key": False,
         },
@@ -365,6 +582,7 @@ def test_agent_execute_persists_messages_and_task_run(test_client: TestClient) -
     assert task_run.output_json is not None
     assert [event.event_type for event in audit_events] == [
         "kernel.execution.started",
+        "skills.resolved",
         "kernel.execution.completed",
     ]
 
@@ -443,7 +661,69 @@ def test_agent_config_can_be_updated_and_reset(test_client: TestClient) -> None:
 
     assert reset_payload["name"] == "Primary Agent"
     assert reset_payload["profile"]["model_name"] == "product-echo/simple"
-    assert "local-first agent" in reset_payload["profile"]["identity_text"]
+    assert "complete work end-to-end" in reset_payload["profile"]["identity_text"]
+    assert reset_payload["profile"]["user_context_text"] == ""
+    assert "auditable product state" in reset_payload["profile"]["policy_base_text"]
+
+
+def test_seed_promotes_legacy_prompt_defaults_without_overwriting_custom_model(
+    test_client: TestClient,
+) -> None:
+    with get_db_session() as session:
+        agent = session.exec(select(Agent)).one()
+        profile = session.exec(select(AgentProfile)).one()
+        agent.name = LEGACY_AGENT_PROFILE.name
+        agent.description = LEGACY_AGENT_PROFILE.description
+        profile.display_name = LEGACY_AGENT_PROFILE.display_name
+        profile.identity_text = LEGACY_AGENT_PROFILE.identity_text
+        profile.soul_text = LEGACY_AGENT_PROFILE.soul_text
+        profile.user_context_text = LEGACY_AGENT_PROFILE.user_context_text
+        profile.policy_base_text = LEGACY_AGENT_PROFILE.policy_base_text
+        profile.model_provider = "kimi-coding"
+        profile.model_name = "K2p5"
+        session.add(agent)
+        session.add(profile)
+        session.commit()
+
+    with get_db_session() as session:
+        seed_default_data(session)
+
+    with get_db_session() as session:
+        profile = session.exec(select(AgentProfile)).one()
+        heartbeat_setting = session.exec(
+            select(Setting).where(
+                Setting.scope == "runtime",
+                Setting.key == "heartbeat_interval_seconds",
+            )
+        ).one()
+
+    assert "complete work end-to-end" in profile.identity_text
+    assert profile.user_context_text == ""
+    assert profile.model_provider == "kimi-coding"
+    assert profile.model_name == "K2p5"
+    assert heartbeat_setting.value_text == "1800"
+
+
+def test_seed_preserves_custom_prompt_defaults(test_client: TestClient) -> None:
+    with get_db_session() as session:
+        profile = session.exec(select(AgentProfile)).one()
+        profile.identity_text = "Custom operator identity."
+        profile.soul_text = "Custom operator soul."
+        profile.user_context_text = "Custom user context."
+        profile.policy_base_text = "Custom policy base."
+        session.add(profile)
+        session.commit()
+
+    with get_db_session() as session:
+        seed_default_data(session)
+
+    with get_db_session() as session:
+        profile = session.exec(select(AgentProfile)).one()
+
+    assert profile.identity_text == "Custom operator identity."
+    assert profile.soul_text == "Custom operator soul."
+    assert profile.user_context_text == "Custom user context."
+    assert profile.policy_base_text == "Custom policy base."
 
 
 def test_tool_permissions_are_listed_and_updatable(test_client: TestClient) -> None:
@@ -496,7 +776,9 @@ def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestC
     assert policy_payload["profiles"][0]["defaults"]["group:web"] == "deny"
 
 
-def test_tool_policy_profile_change_recomputes_effective_permissions(test_client: TestClient) -> None:
+def test_tool_policy_profile_change_recomputes_effective_permissions(
+    test_client: TestClient,
+) -> None:
     update_response = test_client.put("/tools/policy", json={"profile_id": "research"})
     assert update_response.status_code == 200
     assert update_response.json()["profile_id"] == "research"
@@ -525,7 +807,10 @@ def test_tool_permission_override_is_reflected_in_policy_state(test_client: Test
 
     policy_response = test_client.get("/tools/policy")
     assert policy_response.status_code == 200
-    overrides = {item["tool_name"]: item["permission_level"] for item in policy_response.json()["overrides"]}
+    overrides = {
+        item["tool_name"]: item["permission_level"]
+        for item in policy_response.json()["overrides"]
+    }
     assert overrides["web_fetch"] == "ask"
 
 
@@ -881,6 +1166,14 @@ def test_cron_job_can_be_paused_activated_and_removed(test_client: TestClient) -
 def test_heartbeat_records_activity_and_cleans_stale_runs(test_client: TestClient) -> None:
     with get_db_session() as session:
         agent_id = session.exec(select(Agent.id).where(Agent.is_default.is_(True))).one()
+        heartbeat_setting = session.exec(
+            select(Setting).where(
+                Setting.scope == "runtime",
+                Setting.key == "heartbeat_interval_seconds",
+            )
+        ).one()
+        heartbeat_setting.value_text = "0.4"
+        session.add(heartbeat_setting)
         stale_task = Task(
             agent_id=agent_id,
             cron_job_id=None,

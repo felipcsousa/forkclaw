@@ -89,8 +89,9 @@ Fase 13 da fundacao de um app desktop local-first com Tauri + React + TypeScript
 - O desktop agora e preparado para distribuicao local com Tauri bundle e backend sidecar empacotado.
 - O backend sidecar cria SQLite, logs e artefatos em diretorios nativos do sistema operacional.
 - O backend agora adiciona `request_id`, logging minimo de requests e respostas JSON de erro mais uteis para suporte.
+- O sistema agora inclui Skills v1 com descoberta em filesystem, precedencia `workspace > user-local > bundled`, gating por contexto e configuracao segura por skill.
 - A documentacao tecnica objetiva fica em `docs/architecture.md` e `docs/technical-roadmap.md`.
-- O contrato atual inclui `GET /health`, `GET /agent`, `GET /agent/config`, `PUT /agent/config`, `POST /agent/config/reset`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages`, `GET /tools/permissions`, `PUT /tools/permissions/{tool_name}`, `GET /tools/calls`, `GET /approvals`, `GET /approvals/{approval_id}`, `POST /approvals/{approval_id}/approve`, `POST /approvals/{approval_id}/deny`, `GET /cron-jobs`, `POST /cron-jobs`, `PATCH /cron-jobs/{job_id}`, `POST /cron-jobs/{job_id}/pause`, `POST /cron-jobs/{job_id}/activate`, `DELETE /cron-jobs/{job_id}`, `GET /activity/timeline`, `GET /settings`, `GET /settings/operational`, `PUT /settings/operational` e `POST /agent/execute`.
+- O contrato atual inclui `GET /health`, `GET /agent`, `GET /agent/config`, `PUT /agent/config`, `POST /agent/config/reset`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `GET /sessions/{id}/messages`, `POST /sessions/{id}/messages`, `GET /tools/permissions`, `PUT /tools/permissions/{tool_name}`, `GET /tools/calls`, `GET /skills`, `PUT /skills/{skill_key}`, `GET /approvals`, `GET /approvals/{approval_id}`, `POST /approvals/{approval_id}/approve`, `POST /approvals/{approval_id}/deny`, `GET /cron-jobs`, `POST /cron-jobs`, `PATCH /cron-jobs/{job_id}`, `POST /cron-jobs/{job_id}/pause`, `POST /cron-jobs/{job_id}/activate`, `DELETE /cron-jobs/{job_id}`, `GET /activity/timeline`, `GET /settings`, `GET /settings/operational`, `PUT /settings/operational` e `POST /agent/execute`.
 - `apps/backend/package.json` existe apenas para integrar o workspace npm raiz; a implementacao continua Python-first.
 
 ## Pre-requisitos
@@ -168,6 +169,7 @@ Documentacao complementar:
 - `docs/architecture.md`
 - `docs/distribution.md`
 - `docs/release-checklist.md`
+- `docs/skills-spec-v1.md`
 - `docs/technical-roadmap.md`
 
 ## Contrato inicial
@@ -197,6 +199,10 @@ Documentacao complementar:
 `PUT /tools/permissions/{tool_name}`
 
 `GET /tools/calls`
+
+`GET /skills`
+
+`PUT /skills/{skill_key}`
 
 `GET /approvals`
 

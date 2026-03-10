@@ -145,6 +145,7 @@ export interface OperationalSettingsRecord {
   monthly_budget_usd: number;
   default_view: OperationalDefaultView;
   activity_poll_seconds: number;
+  heartbeat_interval_seconds: number;
   provider_api_key_configured: boolean;
 }
 
@@ -157,6 +158,7 @@ export interface OperationalSettingsUpdate {
   monthly_budget_usd: number;
   default_view: OperationalDefaultView;
   activity_poll_seconds: number;
+  heartbeat_interval_seconds: number;
   api_key?: string | null;
   clear_api_key: boolean;
 }
@@ -243,6 +245,7 @@ export interface ToolCallRecord {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  guided_by_skills: SkillSummaryRecord[];
 }
 
 export interface ToolCallsResponse {
@@ -326,12 +329,54 @@ export interface ActivityTimelineItemRecord {
   error_message: string | null;
   duration_ms: number | null;
   estimated_cost_usd: number | null;
+  skill_strategy: string | null;
+  resolved_skills: SkillSummaryRecord[];
   entries: ActivityTimelineEntryRecord[];
   audit_log: ActivityAuditEventRecord[];
 }
 
 export interface ActivityTimelineResponse {
   items: ActivityTimelineItemRecord[];
+}
+
+export type SkillOrigin = 'bundled' | 'user-local' | 'workspace';
+
+export interface SkillRecord {
+  key: string;
+  name: string;
+  description: string;
+  origin: SkillOrigin;
+  enabled: boolean;
+  eligible: boolean;
+  selected: boolean;
+  blocked_reasons: string[];
+  config: Record<string, unknown> | null;
+  configured_env_keys: string[];
+  primary_env: string | null;
+}
+
+export interface SkillsResponse {
+  strategy: string;
+  items: SkillRecord[];
+}
+
+export interface SkillSummaryRecord {
+  key: string;
+  name: string;
+  origin: SkillOrigin;
+  source_path: string;
+  selected: boolean;
+  eligible: boolean;
+  blocked_reasons: string[];
+}
+
+export interface SkillUpdateInput {
+  enabled?: boolean;
+  config?: Record<string, unknown> | null;
+  env?: Record<string, string> | null;
+  clear_env?: string[];
+  api_key?: string | null;
+  clear_api_key?: boolean;
 }
 
 export type CronJobType =
@@ -563,6 +608,17 @@ export function updateToolPermission(
 
 export function fetchToolCalls(): Promise<ToolCallsResponse> {
   return getJson<ToolCallsResponse>('/tools/calls');
+}
+
+export function fetchSkills(): Promise<SkillsResponse> {
+  return getJson<SkillsResponse>('/skills');
+}
+
+export function updateSkill(
+  skillKey: string,
+  payload: SkillUpdateInput,
+): Promise<SkillRecord> {
+  return sendJson<SkillRecord>('PUT', `/skills/${skillKey}`, payload);
 }
 
 export function fetchApprovals(): Promise<ApprovalsResponse> {

@@ -6,7 +6,10 @@ from typing import Any, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
 )
+
+from app.schemas.skill import SkillSummaryRead
 
 PermissionLevel = Literal["deny", "ask", "allow"]
 ToolRisk = Literal["low", "medium", "high"]
@@ -52,6 +55,7 @@ class ToolCallRead(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    guided_by_skills: list[SkillSummaryRead] = Field(default_factory=list)
 
 
 class ToolCallsResponse(BaseModel):

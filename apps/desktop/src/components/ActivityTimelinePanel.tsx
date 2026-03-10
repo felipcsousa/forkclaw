@@ -93,6 +93,17 @@ export function ActivityTimelinePanel({
                 </div>
               ) : null}
 
+              {item.resolved_skills.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <Badge variant="outline" className="px-2 py-0 text-[10px]">
+                    Guided by: {item.resolved_skills.map((skill) => skill.name).join(', ')}
+                  </Badge>
+                  {item.skill_strategy ? (
+                    <span>Strategy: {item.skill_strategy}</span>
+                  ) : null}
+                </div>
+              ) : null}
+
               {item.entries.length > 0 ? (
                 <div className="mt-3">
                   <details className="group/details">

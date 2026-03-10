@@ -6,17 +6,17 @@ from sqlmodel import Session
 from app.api.errors import value_error_as_http_exception
 from app.db.session import get_session
 from app.schemas.tool import (
-    ToolCatalogEntryRead,
-    ToolCatalogResponse,
     ToolCallRead,
     ToolCallsResponse,
+    ToolCatalogEntryRead,
+    ToolCatalogResponse,
+    ToolPermissionRead,
+    ToolPermissionsResponse,
+    ToolPermissionUpdate,
     ToolPolicyOverrideRead,
     ToolPolicyProfileRead,
     ToolPolicyRead,
     ToolPolicyUpdate,
-    ToolPermissionRead,
-    ToolPermissionsResponse,
-    ToolPermissionUpdate,
 )
 from app.services.tools import ToolService
 

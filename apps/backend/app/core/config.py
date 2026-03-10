@@ -19,8 +19,9 @@ class Settings:
     default_agent_slug: str
     default_timezone: str
     default_workspace_root: Path
+    bundled_skills_root: Path
+    user_skills_root: Path
     scheduler_poll_interval_seconds: float
-    heartbeat_interval_seconds: float
     stale_task_run_seconds: int
     secret_backend: str
     secret_service_name: str
@@ -31,6 +32,7 @@ class Settings:
     default_monthly_budget_usd: float
     default_app_view: str
     default_activity_poll_seconds: int
+    default_heartbeat_interval_seconds: int
     tool_timeout_seconds: float
     web_search_cache_ttl_seconds: int
     web_fetch_cache_ttl_seconds: int
@@ -72,10 +74,15 @@ def _build_settings() -> Settings:
         default_workspace_root=Path(
             os.getenv("APP_WORKSPACE_ROOT", backend_root.parents[1])
         ).resolve(),
+        bundled_skills_root=Path(
+            os.getenv("APP_BUNDLED_SKILLS_ROOT", backend_root / "app" / "skills" / "bundled")
+        ).expanduser().resolve(),
+        user_skills_root=Path(
+            os.getenv("APP_USER_SKILLS_ROOT", Path.home() / ".forkclaw" / "skills")
+        ).expanduser().resolve(),
         scheduler_poll_interval_seconds=float(
             os.getenv("SCHEDULER_POLL_INTERVAL_SECONDS", "1.0")
         ),
-        heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "60.0")),
         stale_task_run_seconds=int(os.getenv("STALE_TASK_RUN_SECONDS", "900")),
         secret_backend=os.getenv("APP_SECRET_BACKEND", "keychain"),
         secret_service_name=os.getenv("APP_SECRET_SERVICE_NAME", "nanobot-agent-console"),
@@ -88,6 +95,9 @@ def _build_settings() -> Settings:
         default_monthly_budget_usd=float(os.getenv("DEFAULT_MONTHLY_BUDGET_USD", "200")),
         default_app_view=os.getenv("DEFAULT_APP_VIEW", "chat"),
         default_activity_poll_seconds=int(os.getenv("DEFAULT_ACTIVITY_POLL_SECONDS", "3")),
+        default_heartbeat_interval_seconds=int(
+            os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
+        ),
         tool_timeout_seconds=float(os.getenv("TOOL_TIMEOUT_SECONDS", "15.0")),
         web_search_cache_ttl_seconds=int(os.getenv("WEB_SEARCH_CACHE_TTL_SECONDS", "900")),
         web_fetch_cache_ttl_seconds=int(os.getenv("WEB_FETCH_CACHE_TTL_SECONDS", "900")),

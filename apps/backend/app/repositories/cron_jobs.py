@@ -25,6 +25,14 @@ class CronJobRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def get_setting(self, scope: str, key: str) -> Setting | None:
+        statement = select(Setting).where(
+            Setting.scope == scope,
+            Setting.key == key,
+            Setting.status == "active",
+        )
+        return self.session.exec(statement).first()
+
     def get_default_agent(self) -> Agent | None:
         statement = select(Agent).where(Agent.is_default.is_(True)).order_by(Agent.created_at.asc())
         return self.session.exec(statement).first()
@@ -250,14 +258,6 @@ class CronJobRepository:
             .where(Task.agent_id == agent_id, TaskRun.created_at >= since)
         )
         return len(list(self.session.exec(statement)))
-
-    def get_setting(self, scope: str, key: str) -> Setting | None:
-        statement = select(Setting).where(
-            Setting.scope == scope,
-            Setting.key == key,
-            Setting.status == "active",
-        )
-        return self.session.exec(statement).first()
 
     def upsert_setting(
         self,
