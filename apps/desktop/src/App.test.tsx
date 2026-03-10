@@ -10,6 +10,8 @@ import {
 } from './components/app-shell-layout';
 import { TooltipProvider } from './components/ui/tooltip';
 
+const baseTimestamp = '2026-03-08T12:00:00Z';
+
 const mockFetchSessions = vi.fn();
 const mockCreateSession = vi.fn();
 const mockFetchSessionMessages = vi.fn();
@@ -32,6 +34,105 @@ const mockPauseCronJob = vi.fn();
 const mockActivateCronJob = vi.fn();
 const mockDeleteCronJob = vi.fn();
 const defaultMatchMedia = window.matchMedia;
+
+const defaultHeartbeat = {
+  last_run_at: null,
+  task_run_id: null,
+  cleaned_stale_runs: 0,
+  pending_approvals: 0,
+  recent_task_runs: 0,
+  summary_text: 'Heartbeat has not run yet.',
+};
+
+function makeSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'session-1',
+    agent_id: 'agent-1',
+    title: 'Persistent Chat',
+    summary: null,
+    status: 'active',
+    started_at: baseTimestamp,
+    last_message_at: null,
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
+    ...overrides,
+  };
+}
+
+function makeMessage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'message-1',
+    session_id: 'session-1',
+    role: 'user',
+    status: 'committed',
+    sequence_number: 1,
+    content_text: 'hello kernel',
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
+    ...overrides,
+  };
+}
+
+function makeToolPermission(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'perm-1',
+    agent_id: 'agent-1',
+    tool_name: 'list_files',
+    workspace_path: '/workspace',
+    permission_level: 'ask',
+    approval_required: true,
+    status: 'active',
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
+    ...overrides,
+  };
+}
+
+function makeCronJob(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'job-1',
+    agent_id: 'agent-1',
+    name: 'Morning Digest',
+    schedule: 'every:60s',
+    timezone: 'UTC',
+    status: 'active',
+    task_payload_json:
+      '{"job_type":"summarize_recent_activity","message":"Daily summary","stale_after_seconds":null}',
+    last_run_at: null,
+    next_run_at: '2026-03-08T12:01:00Z',
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
+    payload: {
+      job_type: 'summarize_recent_activity',
+      message: 'Daily summary',
+      stale_after_seconds: null,
+    },
+    ...overrides,
+  };
+}
+
+function makeApproval(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'approval-1',
+    agent_id: 'agent-1',
+    task_id: 'task-1',
+    tool_call_id: 'call-1',
+    kind: 'tool_permission',
+    requested_action: 'write_file({"path":"todo.txt","content":"secret plan"})',
+    reason: 'Tool permission is configured as ask.',
+    status: 'pending',
+    decided_at: null,
+    expires_at: null,
+    created_at: '2026-03-08T12:02:00Z',
+    updated_at: '2026-03-08T12:02:00Z',
+    tool_name: 'write_file',
+    tool_input_json: '{"path":"todo.txt","content":"secret plan"}',
+    session_id: 'session-approval',
+    session_title: 'Approval Session',
+    task_run_id: 'run-1',
+    ...overrides,
+  };
+}
 
 vi.mock('./lib/backend', () => ({
   fetchSessions: () => mockFetchSessions(),
@@ -66,8 +167,8 @@ const agentConfig = {
   description: 'Default single-agent instance.',
   status: 'active',
   is_default: true,
-  created_at: '2026-03-08T12:00:00Z',
-  updated_at: '2026-03-08T12:00:00Z',
+  created_at: baseTimestamp,
+  updated_at: baseTimestamp,
   profile: {
     id: 'profile-1',
     display_name: 'Nanobot',
@@ -80,8 +181,8 @@ const agentConfig = {
     model_provider: 'product_echo',
     model_name: 'product-echo/simple',
     status: 'active',
-    created_at: '2026-03-08T12:00:00Z',
-    updated_at: '2026-03-08T12:00:00Z',
+    created_at: baseTimestamp,
+    updated_at: baseTimestamp,
   },
 };
 
@@ -100,19 +201,7 @@ describe('App', () => {
     mockFetchAgentConfig.mockResolvedValue(agentConfig);
     mockFetchToolPermissions.mockResolvedValue({
       workspace_root: '/workspace',
-      items: [
-        {
-          id: 'perm-1',
-          agent_id: 'agent-1',
-          tool_name: 'list_files',
-          workspace_path: '/workspace',
-          permission_level: 'ask',
-          approval_required: true,
-          status: 'active',
-          created_at: '2026-03-08T12:00:00Z',
-          updated_at: '2026-03-08T12:00:00Z',
-        },
-      ],
+      items: [makeToolPermission()],
     });
     mockFetchToolCalls.mockResolvedValue({ items: [] });
     mockFetchApprovals.mockResolvedValue({ items: [] });
@@ -131,14 +220,7 @@ describe('App', () => {
     mockFetchCronJobsDashboard.mockResolvedValue({
       items: [],
       history: [],
-      heartbeat: {
-        last_run_at: null,
-        task_run_id: null,
-        cleaned_stale_runs: 0,
-        pending_approvals: 0,
-        recent_task_runs: 0,
-        summary_text: 'Heartbeat has not run yet.',
-      },
+      heartbeat: defaultHeartbeat,
     });
   });
 
@@ -147,17 +229,10 @@ describe('App', () => {
   });
 
   it('loads a persisted session and sends a new message through the backend', async () => {
-    const session = {
-      id: 'session-1',
-      agent_id: 'agent-1',
-      title: 'Persistent Chat',
-      summary: null,
-      status: 'active',
-      started_at: '2026-03-08T12:00:00Z',
+    const session = makeSession({
       last_message_at: '2026-03-08T12:01:00Z',
-      created_at: '2026-03-08T12:00:00Z',
       updated_at: '2026-03-08T12:01:00Z',
-    };
+    });
 
     mockFetchSessions
       .mockResolvedValueOnce({ items: [session] })
@@ -167,26 +242,20 @@ describe('App', () => {
       .mockResolvedValueOnce({
         session,
         items: [
-          {
-            id: 'message-1',
+          makeMessage({
             session_id: session.id,
-            role: 'user',
-            status: 'committed',
-            sequence_number: 1,
-            content_text: 'hello kernel',
             created_at: '2026-03-08T12:02:00Z',
             updated_at: '2026-03-08T12:02:00Z',
-          },
-          {
+          }),
+          makeMessage({
             id: 'message-2',
             session_id: session.id,
             role: 'assistant',
-            status: 'committed',
             sequence_number: 2,
             content_text: 'Reply: hello kernel',
             created_at: '2026-03-08T12:02:01Z',
             updated_at: '2026-03-08T12:02:01Z',
-          },
+          }),
         ],
       });
     mockSendSessionMessage.mockResolvedValueOnce({
@@ -214,17 +283,13 @@ describe('App', () => {
   });
 
   it('creates a new session from the empty state', async () => {
-    const createdSession = {
+    const createdSession = makeSession({
       id: 'session-new',
-      agent_id: 'agent-1',
       title: 'New Session',
-      summary: null,
-      status: 'active',
       started_at: '2026-03-08T12:05:00Z',
-      last_message_at: null,
       created_at: '2026-03-08T12:05:00Z',
       updated_at: '2026-03-08T12:05:00Z',
-    };
+    });
 
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
     mockCreateSession.mockResolvedValueOnce(createdSession);
@@ -251,17 +316,10 @@ describe('App', () => {
   });
 
   it('renders a stable desktop sidebar with explicit active navigation and session states', async () => {
-    const session = {
-      id: 'session-1',
-      agent_id: 'agent-1',
-      title: 'Persistent Chat',
-      summary: null,
-      status: 'active',
-      started_at: '2026-03-08T12:00:00Z',
+    const session = makeSession({
       last_message_at: '2026-03-08T12:01:00Z',
-      created_at: '2026-03-08T12:00:00Z',
       updated_at: '2026-03-08T12:01:00Z',
-    };
+    });
 
     mockFetchSessions.mockResolvedValueOnce({ items: [session] });
     mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
@@ -326,28 +384,21 @@ describe('App', () => {
   });
 
   it('sorts and groups sessions in the sidebar by most recent activity', async () => {
-    const recentSession = {
+    const recentSession = makeSession({
       id: 'session-recent',
-      agent_id: 'agent-1',
       title: 'Recent Follow-up',
-      summary: null,
-      status: 'active',
       started_at: '2026-03-07T08:00:00Z',
       last_message_at: '2026-03-09T09:15:00Z',
       created_at: '2026-03-07T08:00:00Z',
       updated_at: '2026-03-09T09:15:00Z',
-    };
-    const staleSession = {
+    });
+    const staleSession = makeSession({
       id: 'session-stale',
-      agent_id: 'agent-1',
       title: 'Older Thread',
-      summary: null,
-      status: 'active',
       started_at: '2026-03-08T10:00:00Z',
-      last_message_at: null,
       created_at: '2026-03-08T10:00:00Z',
       updated_at: '2026-03-08T10:00:00Z',
-    };
+    });
 
     mockFetchSessions.mockResolvedValueOnce({ items: [staleSession, recentSession] });
     mockFetchSessionMessages.mockResolvedValueOnce({ session: recentSession, items: [] });
@@ -457,14 +508,9 @@ describe('App', () => {
   it('updates a tool permission from the tools panel', async () => {
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
     mockUpdateToolPermission.mockResolvedValueOnce({
-      id: 'perm-1',
-      agent_id: 'agent-1',
-      tool_name: 'list_files',
-      workspace_path: '/workspace',
+      ...makeToolPermission(),
       permission_level: 'allow',
       approval_required: false,
-      status: 'active',
-      created_at: '2026-03-08T12:00:00Z',
       updated_at: '2026-03-08T12:10:00Z',
     });
 
@@ -573,62 +619,37 @@ describe('App', () => {
   });
 
   it('approves a pending tool request from the approvals inbox', async () => {
-    const session = {
+    const session = makeSession({
       id: 'session-approval',
-      agent_id: 'agent-1',
       title: 'Approval Session',
-      summary: null,
-      status: 'active',
-      started_at: '2026-03-08T12:00:00Z',
       last_message_at: '2026-03-08T12:01:00Z',
-      created_at: '2026-03-08T12:00:00Z',
       updated_at: '2026-03-08T12:01:00Z',
-    };
+    });
 
-    const approval = {
-      id: 'approval-1',
-      agent_id: 'agent-1',
-      task_id: 'task-1',
-      tool_call_id: 'call-1',
-      kind: 'tool_permission',
-      requested_action: 'write_file({"path":"todo.txt","content":"secret plan"})',
-      reason: 'Tool permission is configured as ask.',
-      status: 'pending',
-      decided_at: null,
-      expires_at: null,
-      created_at: '2026-03-08T12:02:00Z',
-      updated_at: '2026-03-08T12:02:00Z',
-      tool_name: 'write_file',
-      tool_input_json: '{"path":"todo.txt","content":"secret plan"}',
+    const approval = makeApproval({
       session_id: session.id,
       session_title: session.title,
-      task_run_id: 'run-1',
-    };
+    });
 
     mockFetchSessions.mockResolvedValue({ items: [session] });
     mockFetchSessionMessages.mockResolvedValue({
       session,
       items: [
-        {
-          id: 'message-1',
+        makeMessage({
           session_id: session.id,
-          role: 'user',
-          status: 'committed',
-          sequence_number: 1,
           content_text: 'tool:write_file path=todo.txt content="secret plan"',
           created_at: '2026-03-08T12:02:00Z',
           updated_at: '2026-03-08T12:02:00Z',
-        },
-        {
+        }),
+        makeMessage({
           id: 'message-2',
           session_id: session.id,
           role: 'assistant',
-          status: 'committed',
           sequence_number: 2,
           content_text: 'Tool `write_file` requires approval and was not executed.',
           created_at: '2026-03-08T12:02:01Z',
           updated_at: '2026-03-08T12:02:01Z',
-        },
+        }),
       ],
     });
     mockFetchApprovals.mockResolvedValue({ items: [approval] });
@@ -662,59 +683,16 @@ describe('App', () => {
   it('creates a scheduled job from the jobs panel', async () => {
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
     mockCreateCronJob.mockResolvedValue({
-      id: 'job-1',
-      agent_id: 'agent-1',
-      name: 'Morning Digest',
-      schedule: 'every:60s',
-      timezone: 'UTC',
-      status: 'active',
-      task_payload_json:
-        '{"job_type":"summarize_recent_activity","message":"Daily summary","stale_after_seconds":null}',
-      last_run_at: null,
-      next_run_at: '2026-03-08T12:01:00Z',
-      created_at: '2026-03-08T12:00:00Z',
-      updated_at: '2026-03-08T12:00:00Z',
-      payload: {
-        job_type: 'summarize_recent_activity',
-        message: 'Daily summary',
-        stale_after_seconds: null,
-      },
+      ...makeCronJob(),
     });
     mockFetchCronJobsDashboard
       .mockResolvedValueOnce({
         items: [],
         history: [],
-        heartbeat: {
-          last_run_at: null,
-          task_run_id: null,
-          cleaned_stale_runs: 0,
-          pending_approvals: 0,
-          recent_task_runs: 0,
-          summary_text: 'Heartbeat has not run yet.',
-        },
+        heartbeat: defaultHeartbeat,
       })
       .mockResolvedValueOnce({
-        items: [
-          {
-            id: 'job-1',
-            agent_id: 'agent-1',
-            name: 'Morning Digest',
-            schedule: 'every:60s',
-            timezone: 'UTC',
-            status: 'active',
-            task_payload_json:
-              '{"job_type":"summarize_recent_activity","message":"Daily summary","stale_after_seconds":null}',
-            last_run_at: null,
-            next_run_at: '2026-03-08T12:01:00Z',
-            created_at: '2026-03-08T12:00:00Z',
-            updated_at: '2026-03-08T12:00:00Z',
-            payload: {
-              job_type: 'summarize_recent_activity',
-              message: 'Daily summary',
-              stale_after_seconds: null,
-            },
-          },
-        ],
+        items: [makeCronJob()],
         history: [],
         heartbeat: {
           last_run_at: '2026-03-08T12:00:30Z',

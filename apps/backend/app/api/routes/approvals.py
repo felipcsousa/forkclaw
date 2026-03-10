@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
+from app.api.errors import value_error_as_http_exception
 from app.db.session import get_session
 from app.schemas.approval import ApprovalActionResponse, ApprovalRead, ApprovalsResponse
 from app.services.approvals import ApprovalService
@@ -17,7 +18,7 @@ def list_approvals(session: Session = Depends(get_session)) -> ApprovalsResponse
     try:
         items = service.list_approvals()
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc
 
     return ApprovalsResponse(items=items)
 
@@ -29,7 +30,7 @@ def get_approval(approval_id: str, session: Session = Depends(get_session)) -> A
     try:
         return service.get_approval(approval_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc
 
 
 @router.post("/approvals/{approval_id}/approve", response_model=ApprovalActionResponse)
@@ -42,7 +43,7 @@ def approve_approval(
     try:
         return service.approve(approval_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc
 
 
 @router.post("/approvals/{approval_id}/deny", response_model=ApprovalActionResponse)
@@ -55,4 +56,4 @@ def deny_approval(
     try:
         return service.deny(approval_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
+from app.api.errors import value_error_as_http_exception
 from app.db.session import get_session
 from app.models.entities import Agent, AgentProfile
 from app.schemas.agent import AgentConfigUpdate, AgentProfileRead, AgentRead
@@ -69,7 +70,7 @@ def update_agent_config(
     try:
         agent, profile = service.update_default_agent_config(payload)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc
 
     return serialize_agent(agent, profile)
 
@@ -81,6 +82,6 @@ def reset_agent_config(session: Session = Depends(get_session)) -> AgentRead:
     try:
         agent, profile = service.reset_default_agent_config()
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc, default_status=404) from exc
 
     return serialize_agent(agent, profile)

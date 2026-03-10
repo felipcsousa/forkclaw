@@ -11,7 +11,7 @@
     "dev:desktop": "npm run dev --workspace @nanobot/desktop",
     "build:backend:sidecar": "npm run package:sidecar --workspace @nanobot/backend",
     "build:desktop:bundle": "npm run bundle --workspace @nanobot/desktop",
-    "dist": "npm run build:backend:sidecar && npm run build:desktop:bundle",
+    "dist": "npm run build:desktop:bundle",
     "lint": "npm run lint:backend && npm run lint:desktop",
     "lint:backend": "npm run lint --workspace @nanobot/backend",
     "lint:desktop": "npm run lint --workspace @nanobot/desktop",

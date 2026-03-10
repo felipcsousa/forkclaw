@@ -8,7 +8,7 @@
     "web:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc && vite build",
     "web:build": "tsc && vite build",
-    "bundle": "tauri build",
+    "bundle": "node ../../infra/scripts/build_desktop_bundle.mjs",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",

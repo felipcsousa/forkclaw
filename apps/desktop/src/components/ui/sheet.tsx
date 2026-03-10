@@ -5,8 +5,6 @@ import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Sheet = DialogPrimitive.Root;
-const SheetTrigger = DialogPrimitive.Trigger;
-const SheetClose = DialogPrimitive.Close;
 
 const SheetPortal = DialogPrimitive.Portal;
 
@@ -54,13 +52,6 @@ const SheetContent = React.forwardRef<
 
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
-const SheetHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex flex-col gap-1.5 border-b border-border/80 px-5 py-4', className)} {...props} />
-);
-
 const SheetTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
@@ -85,10 +76,7 @@ SheetDescription.displayName = DialogPrimitive.Description.displayName;
 
 export {
   Sheet,
-  SheetClose,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
-  SheetTrigger,
 };

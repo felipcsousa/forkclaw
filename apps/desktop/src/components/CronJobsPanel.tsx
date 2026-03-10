@@ -1,9 +1,9 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Field, SelectInput } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import {
   Table,
@@ -52,28 +52,6 @@ function statusVariant(status: string) {
   }
 
   return 'secondary' as const;
-}
-
-function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <Label htmlFor={htmlFor}>{label}</Label>
-        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
-      </div>
-      {children}
-    </div>
-  );
 }
 
 export function CronJobsPanel({
@@ -172,9 +150,9 @@ export function CronJobsPanel({
                 htmlFor={`${idBase}-job-type`}
                 hint="Task to run."
               >
-                <select
+                <SelectInput
                   id={`${idBase}-job-type`}
-                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className="rounded-lg border-input px-3 py-2 shadow-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   value={jobType}
                   onChange={(e) => setJobType(e.target.value as CronJobType)}
                 >
@@ -183,7 +161,7 @@ export function CronJobsPanel({
                       {label}
                     </option>
                   ))}
-                </select>
+                </SelectInput>
               </Field>
             </div>
 

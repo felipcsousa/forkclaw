@@ -88,7 +88,7 @@ fn resolve_backend_binary(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error
     Ok(app
         .path()
         .resource_dir()?
-        .join("resources")
+        .join(".sidecar")
         .join("backend")
         .join(file_name))
 }

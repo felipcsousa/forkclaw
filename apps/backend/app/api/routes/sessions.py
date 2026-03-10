@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
+from app.api.errors import value_error_as_http_exception
 from app.db.session import get_session
 from app.schemas.execution import AgentExecutionResponse
 from app.schemas.message import MessageRead, SessionMessageCreate, SessionMessagesResponse
@@ -30,8 +31,7 @@ def create_session(
     try:
         record = service.create_session(payload.title)
     except ValueError as exc:
-        status_code = 404 if "not found" in str(exc).lower() else 400
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc) from exc
 
     return SessionRead.model_validate(record)
 
@@ -86,5 +86,4 @@ def post_session_message(
             message=payload.content,
         )
     except ValueError as exc:
-        status_code = 404 if "not found" in str(exc).lower() else 400
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        raise value_error_as_http_exception(exc) from exc

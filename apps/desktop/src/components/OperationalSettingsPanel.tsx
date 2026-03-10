@@ -1,9 +1,9 @@
-import { FormEvent, useId, type ReactNode } from 'react';
+import { FormEvent, useId } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Field, SelectInput } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
@@ -43,39 +43,6 @@ const defaultViewOptions: Array<{ value: OperationalDefaultView; label: string }
   { value: 'jobs', label: 'Jobs' },
   { value: 'activity', label: 'Activity' },
 ];
-
-function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <Label htmlFor={htmlFor}>{label}</Label>
-        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function SelectInput(
-  props: React.SelectHTMLAttributes<HTMLSelectElement>,
-) {
-  return (
-    <select
-      className="flex h-10 w-full rounded-xl border border-border/70 bg-background px-3.5 py-2 text-sm text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition-all hover:border-border hover:bg-muted/35 focus:border-ring/25 focus:outline-none focus:ring-2 focus:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
-      {...props}
-    />
-  );
-}
 
 export function OperationalSettingsPanel({
   settings,

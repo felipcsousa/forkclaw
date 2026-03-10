@@ -1,9 +1,8 @@
 import { FormEvent, useId } from 'react';
 
-
 import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,28 +17,6 @@ interface AgentSettingsPanelProps {
   onDraftChange: (field: keyof AgentConfigUpdate, value: string) => void;
   onSave: () => void;
   onReset: () => void;
-}
-
-function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <Label htmlFor={htmlFor}>{label}</Label>
-        {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
-      </div>
-      {children}
-    </div>
-  );
 }
 
 export function AgentSettingsPanel({

@@ -391,169 +391,140 @@ async function requestJson<T>(
     throw new Error(await parseErrorResponse(response));
   }
 
+  if (response.status === 204) {
+    return null as T;
+  }
+
   return (await response.json()) as T;
 }
 
+function getJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path, { method: 'GET' });
+}
+
+function sendJson<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  return requestJson<T>(path, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+async function requestVoid(path: string, init?: RequestInit): Promise<void> {
+  await requestJson<null>(path, init);
+}
+
 export function fetchHealth(): Promise<HealthResponse> {
-  return requestJson<HealthResponse>('/health', { method: 'GET' });
+  return getJson<HealthResponse>('/health');
 }
 
 export function fetchAgentConfig(): Promise<AgentRecord> {
-  return requestJson<AgentRecord>('/agent/config', { method: 'GET' });
+  return getJson<AgentRecord>('/agent/config');
 }
 
 export function updateAgentConfig(
   payload: AgentConfigUpdate,
 ): Promise<AgentRecord> {
-  return requestJson<AgentRecord>('/agent/config', {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  return sendJson<AgentRecord>('PUT', '/agent/config', payload);
 }
 
 export function resetAgentConfig(): Promise<AgentRecord> {
-  return requestJson<AgentRecord>('/agent/config/reset', {
-    method: 'POST',
-  });
+  return sendJson<AgentRecord>('POST', '/agent/config/reset');
 }
 
 export function fetchSessions(): Promise<SessionsListResponse> {
-  return requestJson<SessionsListResponse>('/sessions', { method: 'GET' });
+  return getJson<SessionsListResponse>('/sessions');
 }
 
 export function fetchOperationalSettings(): Promise<OperationalSettingsRecord> {
-  return requestJson<OperationalSettingsRecord>('/settings/operational', {
-    method: 'GET',
-  });
+  return getJson<OperationalSettingsRecord>('/settings/operational');
 }
 
 export function updateOperationalSettings(
   payload: OperationalSettingsUpdate,
 ): Promise<OperationalSettingsRecord> {
-  return requestJson<OperationalSettingsRecord>('/settings/operational', {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  return sendJson<OperationalSettingsRecord>('PUT', '/settings/operational', payload);
 }
 
 export function fetchToolPermissions(): Promise<ToolPermissionsResponse> {
-  return requestJson<ToolPermissionsResponse>('/tools/permissions', {
-    method: 'GET',
-  });
+  return getJson<ToolPermissionsResponse>('/tools/permissions');
 }
 
 export function updateToolPermission(
   toolName: string,
   permissionLevel: ToolPermissionLevel,
 ): Promise<ToolPermissionRecord> {
-  return requestJson<ToolPermissionRecord>(`/tools/permissions/${toolName}`, {
-    method: 'PUT',
-    body: JSON.stringify({ permission_level: permissionLevel }),
-  });
+  return sendJson<ToolPermissionRecord>(
+    'PUT',
+    `/tools/permissions/${toolName}`,
+    { permission_level: permissionLevel },
+  );
 }
 
 export function fetchToolCalls(): Promise<ToolCallsResponse> {
-  return requestJson<ToolCallsResponse>('/tools/calls', {
-    method: 'GET',
-  });
+  return getJson<ToolCallsResponse>('/tools/calls');
 }
 
 export function fetchApprovals(): Promise<ApprovalsResponse> {
-  return requestJson<ApprovalsResponse>('/approvals', {
-    method: 'GET',
-  });
+  return getJson<ApprovalsResponse>('/approvals');
 }
 
 export function fetchActivityTimeline(): Promise<ActivityTimelineResponse> {
-  return requestJson<ActivityTimelineResponse>('/activity/timeline', {
-    method: 'GET',
-  });
+  return getJson<ActivityTimelineResponse>('/activity/timeline');
 }
 
 export function fetchCronJobsDashboard(): Promise<CronJobsDashboardResponse> {
-  return requestJson<CronJobsDashboardResponse>('/cron-jobs', {
-    method: 'GET',
-  });
+  return getJson<CronJobsDashboardResponse>('/cron-jobs');
 }
 
 export function createCronJob(
   payload: CronJobCreateInput,
 ): Promise<CronJobRecord> {
-  return requestJson<CronJobRecord>('/cron-jobs', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return sendJson<CronJobRecord>('POST', '/cron-jobs', payload);
 }
 
 export function pauseCronJob(jobId: string): Promise<CronJobRecord> {
-  return requestJson<CronJobRecord>(`/cron-jobs/${jobId}/pause`, {
-    method: 'POST',
-  });
+  return sendJson<CronJobRecord>('POST', `/cron-jobs/${jobId}/pause`);
 }
 
 export function activateCronJob(jobId: string): Promise<CronJobRecord> {
-  return requestJson<CronJobRecord>(`/cron-jobs/${jobId}/activate`, {
-    method: 'POST',
-  });
+  return sendJson<CronJobRecord>('POST', `/cron-jobs/${jobId}/activate`);
 }
 
 export async function deleteCronJob(jobId: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetch(`${backendUrl}/cron-jobs/${jobId}`, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      method: 'DELETE',
-    });
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : 'Unknown network failure.';
-    throw new Error(`Could not reach the local backend at ${backendUrl}. ${message}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(await parseErrorResponse(response));
-  }
+  await requestVoid(`/cron-jobs/${jobId}`, { method: 'DELETE' });
 }
 
 export function approveApproval(
   approvalId: string,
 ): Promise<ApprovalActionResponse> {
-  return requestJson<ApprovalActionResponse>(`/approvals/${approvalId}/approve`, {
-    method: 'POST',
-  });
+  return sendJson<ApprovalActionResponse>('POST', `/approvals/${approvalId}/approve`);
 }
 
 export function denyApproval(
   approvalId: string,
 ): Promise<ApprovalActionResponse> {
-  return requestJson<ApprovalActionResponse>(`/approvals/${approvalId}/deny`, {
-    method: 'POST',
-  });
+  return sendJson<ApprovalActionResponse>('POST', `/approvals/${approvalId}/deny`);
 }
 
 export function createSession(title?: string): Promise<SessionRecord> {
-  return requestJson<SessionRecord>('/sessions', {
-    method: 'POST',
-    body: JSON.stringify({ title: title || null }),
-  });
+  return sendJson<SessionRecord>('POST', '/sessions', { title: title || null });
 }
 
 export function fetchSessionMessages(
   sessionId: string,
 ): Promise<SessionMessagesResponse> {
-  return requestJson<SessionMessagesResponse>(`/sessions/${sessionId}/messages`, {
-    method: 'GET',
-  });
+  return getJson<SessionMessagesResponse>(`/sessions/${sessionId}/messages`);
 }
 
 export function sendSessionMessage(
   sessionId: string,
   content: string,
 ): Promise<AgentExecutionResponse> {
-  return requestJson<AgentExecutionResponse>(`/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({ content }),
+  return sendJson<AgentExecutionResponse>('POST', `/sessions/${sessionId}/messages`, {
+    content,
   });
 }
