@@ -31,6 +31,11 @@ class Settings:
     default_monthly_budget_usd: float
     default_app_view: str
     default_activity_poll_seconds: int
+    tool_timeout_seconds: float
+    web_search_cache_ttl_seconds: int
+    web_fetch_cache_ttl_seconds: int
+    web_fetch_max_response_bytes: int
+    web_fetch_default_max_chars: int
 
     def ensure_data_dir(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -83,6 +88,13 @@ def _build_settings() -> Settings:
         default_monthly_budget_usd=float(os.getenv("DEFAULT_MONTHLY_BUDGET_USD", "200")),
         default_app_view=os.getenv("DEFAULT_APP_VIEW", "chat"),
         default_activity_poll_seconds=int(os.getenv("DEFAULT_ACTIVITY_POLL_SECONDS", "3")),
+        tool_timeout_seconds=float(os.getenv("TOOL_TIMEOUT_SECONDS", "15.0")),
+        web_search_cache_ttl_seconds=int(os.getenv("WEB_SEARCH_CACHE_TTL_SECONDS", "900")),
+        web_fetch_cache_ttl_seconds=int(os.getenv("WEB_FETCH_CACHE_TTL_SECONDS", "900")),
+        web_fetch_max_response_bytes=int(
+            os.getenv("WEB_FETCH_MAX_RESPONSE_BYTES", str(512 * 1024))
+        ),
+        web_fetch_default_max_chars=int(os.getenv("WEB_FETCH_DEFAULT_MAX_CHARS", "8000")),
     )
 
 

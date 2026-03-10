@@ -57,6 +57,7 @@ function App() {
     handleActivateJob,
     handleAgentDraftChange,
     handleApproveApproval,
+    handleChangeToolPolicyProfile,
     handleChangeToolPermission,
     handleCreateJob,
     handleCreateSession,
@@ -105,6 +106,8 @@ function App() {
     setErrorMessage,
     setMobileNavOpen,
     toolCalls,
+    toolCatalog,
+    toolPolicy,
     toolPermissions,
     view,
     workspaceRoot,
@@ -165,11 +168,14 @@ function App() {
     if (view === 'tools') {
       return (
         <ToolPermissionsPanel
+          catalog={toolCatalog}
+          policy={toolPolicy}
           workspaceRoot={workspaceRoot}
           permissions={toolPermissions}
           calls={toolCalls}
           isLoading={isLoadingTools}
           isUpdating={isUpdatingToolPermission}
+          onChangeProfile={handleChangeToolPolicyProfile}
           onChangePermission={handleChangeToolPermission}
         />
       );

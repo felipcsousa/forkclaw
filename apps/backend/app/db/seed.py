@@ -7,7 +7,17 @@ from sqlmodel import Session, select
 from app.core.agent_profile_defaults import DEFAULT_AGENT_PROFILE, summarize_persona
 from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.models.entities import Agent, AgentProfile, AuditEvent, Setting, ToolPermission, utc_now
+from app.models.entities import (
+    Agent,
+    AgentProfile,
+    AuditEvent,
+    Setting,
+    ToolPermission,
+    ToolPolicyOverride,
+    utc_now,
+)
+from app.tools.catalog import build_tool_catalog
+from app.tools.policies import get_tool_policy_profile, resolve_effective_permission_level
 
 
 def seed_default_data(session: Session) -> Agent:
@@ -86,13 +96,16 @@ def seed_default_data(session: Session) -> Agent:
             "preferences",
             "activity_poll_seconds",
         ): ("integer", str(settings.default_activity_poll_seconds)),
+        ("tools", "policy_profile"): ("string", "minimal"),
     }
 
+    created_settings: set[tuple[str, str]] = set()
     for (scope, key), (value_type, value_text) in defaults.items():
         existing_setting = session.exec(
             select(Setting).where(Setting.scope == scope, Setting.key == key)
         ).first()
         if existing_setting is None:
+            created_settings.add((scope, key))
             session.add(
                 Setting(
                     scope=scope,
@@ -104,34 +117,98 @@ def seed_default_data(session: Session) -> Agent:
                 )
             )
 
-    tool_defaults = {
-        "list_files": ("ask", True, str(settings.default_workspace_root)),
-        "read_file": ("ask", True, str(settings.default_workspace_root)),
-        "write_file": ("ask", True, str(settings.default_workspace_root)),
-        "edit_file": ("ask", True, str(settings.default_workspace_root)),
-        "clipboard_read": ("ask", True, None),
-        "clipboard_write": ("ask", True, None),
-    }
-
-    for tool_name, (permission_level, approval_required, workspace_path) in tool_defaults.items():
-        existing_permission = session.exec(
+    existing_permissions = {
+        item.tool_name: item
+        for item in session.exec(
             select(ToolPermission).where(
                 ToolPermission.agent_id == existing_agent.id,
-                ToolPermission.tool_name == tool_name,
                 ToolPermission.status == "active",
             )
-        ).first()
-        if existing_permission is None:
-            session.add(
-                ToolPermission(
-                    agent_id=existing_agent.id,
-                    tool_name=tool_name,
-                    workspace_path=workspace_path,
-                    permission_level=permission_level,
-                    approval_required=approval_required,
-                    status="active",
-                )
+        )
+    }
+
+    active_profile_setting = session.exec(
+        select(Setting).where(Setting.scope == "tools", Setting.key == "policy_profile")
+    ).first()
+    profile_id = (
+        active_profile_setting.value_text
+        if active_profile_setting and active_profile_setting.value_text
+        else "minimal"
+    )
+    try:
+        profile_id = get_tool_policy_profile(profile_id).id
+    except ValueError:
+        profile_id = "minimal"
+
+    catalog = build_tool_catalog()
+    existing_overrides = {
+        item.tool_name: item
+        for item in session.exec(
+            select(ToolPolicyOverride).where(
+                ToolPolicyOverride.agent_id == existing_agent.id,
+                ToolPolicyOverride.status == "active",
             )
+        )
+    }
+
+    if ("tools", "policy_profile") in created_settings:
+        for item in catalog:
+            existing_permission = existing_permissions.get(item.id)
+            if existing_permission is None or item.id in existing_overrides:
+                continue
+
+            default_level = resolve_effective_permission_level(
+                profile_id="minimal",
+                tool_group=item.group,
+                override_level=None,
+            )
+            if existing_permission.permission_level == default_level:
+                continue
+
+            override = ToolPolicyOverride(
+                agent_id=existing_agent.id,
+                tool_name=item.id,
+                permission_level=existing_permission.permission_level,
+                status="active",
+            )
+            session.add(override)
+            existing_overrides[item.id] = override
+
+    workspace_root_setting = session.exec(
+        select(Setting).where(Setting.scope == "security", Setting.key == "workspace_root")
+    ).first()
+    workspace_root = (
+        workspace_root_setting.value_text
+        if workspace_root_setting and workspace_root_setting.value_text
+        else str(settings.default_workspace_root)
+    )
+    for item in catalog:
+        effective_level = resolve_effective_permission_level(
+            profile_id=profile_id,
+            tool_group=item.group,
+            override_level=(
+                existing_overrides[item.id].permission_level
+                if item.id in existing_overrides
+                else None
+            ),
+        )
+        existing_permission = existing_permissions.get(item.id)
+        if existing_permission is None:
+            existing_permission = ToolPermission(
+                agent_id=existing_agent.id,
+                tool_name=item.id,
+                workspace_path=workspace_root if item.requires_workspace else None,
+                permission_level=effective_level,
+                approval_required=effective_level == "ask",
+                status="active",
+            )
+        else:
+            existing_permission.workspace_path = workspace_root if item.requires_workspace else None
+            existing_permission.permission_level = effective_level
+            existing_permission.approval_required = effective_level == "ask"
+            existing_permission.status = "active"
+            existing_permission.updated_at = utc_now()
+        session.add(existing_permission)
 
     seed_event = session.exec(
         select(AuditEvent).where(

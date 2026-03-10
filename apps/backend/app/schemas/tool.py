@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -9,6 +9,9 @@ from pydantic import (
 )
 
 PermissionLevel = Literal["deny", "ask", "allow"]
+ToolRisk = Literal["low", "medium", "high"]
+ToolStatus = Literal["enabled", "experimental", "disabled"]
+ToolPolicyProfileId = Literal["minimal", "coding", "research", "full"]
 
 
 class ToolPermissionRead(BaseModel):
@@ -53,3 +56,49 @@ class ToolCallRead(BaseModel):
 
 class ToolCallsResponse(BaseModel):
     items: list[ToolCallRead]
+
+
+class ToolCatalogEntryRead(BaseModel):
+    id: str
+    label: str
+    description: str
+    group: str
+    group_label: str
+    risk: ToolRisk
+    status: ToolStatus
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None
+    requires_workspace: bool
+
+
+class ToolCatalogResponse(BaseModel):
+    items: list[ToolCatalogEntryRead]
+
+
+class ToolPolicyProfileRead(BaseModel):
+    id: ToolPolicyProfileId
+    label: str
+    description: str
+    defaults: dict[str, PermissionLevel]
+
+
+class ToolPolicyOverrideRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    tool_name: str
+    permission_level: PermissionLevel
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ToolPolicyRead(BaseModel):
+    profile_id: ToolPolicyProfileId
+    profiles: list[ToolPolicyProfileRead]
+    overrides: list[ToolPolicyOverrideRead]
+
+
+class ToolPolicyUpdate(BaseModel):
+    profile_id: ToolPolicyProfileId

@@ -21,6 +21,9 @@ const mockUpdateAgentConfig = vi.fn();
 const mockResetAgentConfig = vi.fn();
 const mockFetchOperationalSettings = vi.fn();
 const mockUpdateOperationalSettings = vi.fn();
+const mockFetchToolCatalog = vi.fn();
+const mockFetchToolPolicy = vi.fn();
+const mockUpdateToolPolicy = vi.fn();
 const mockFetchToolPermissions = vi.fn();
 const mockFetchToolCalls = vi.fn();
 const mockUpdateToolPermission = vi.fn();
@@ -97,6 +100,68 @@ function makeToolPermission(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeToolCatalogEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'list_files',
+    label: 'List files',
+    description: 'List files and directories inside the configured workspace.',
+    group: 'group:fs',
+    group_label: 'Filesystem',
+    risk: 'low',
+    status: 'enabled',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+    },
+    output_schema: {
+      type: 'object',
+      properties: {
+        count: { type: 'integer' },
+      },
+    },
+    requires_workspace: true,
+    ...overrides,
+  };
+}
+
+function makeToolPolicy(overrides: Record<string, unknown> = {}) {
+  return {
+    profile_id: 'minimal',
+    profiles: [
+      {
+        id: 'minimal',
+        label: 'Minimal',
+        description: 'Deny web access and require approval elsewhere.',
+        defaults: {
+          'group:fs': 'ask',
+          'group:runtime': 'ask',
+          'group:web': 'deny',
+          'group:sessions': 'ask',
+          'group:memory': 'ask',
+          'group:automation': 'ask',
+        },
+      },
+      {
+        id: 'research',
+        label: 'Research',
+        description: 'Allow web and memory tools by default.',
+        defaults: {
+          'group:fs': 'ask',
+          'group:runtime': 'ask',
+          'group:web': 'allow',
+          'group:sessions': 'ask',
+          'group:memory': 'allow',
+          'group:automation': 'ask',
+        },
+      },
+    ],
+    overrides: [],
+    ...overrides,
+  };
+}
+
 function makeCronJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 'job-1',
@@ -154,6 +219,9 @@ vi.mock('./lib/backend', () => ({
   resetAgentConfig: () => mockResetAgentConfig(),
   fetchOperationalSettings: () => mockFetchOperationalSettings(),
   updateOperationalSettings: (payload: unknown) => mockUpdateOperationalSettings(payload),
+  fetchToolCatalog: () => mockFetchToolCatalog(),
+  fetchToolPolicy: () => mockFetchToolPolicy(),
+  updateToolPolicy: (profileId: string) => mockUpdateToolPolicy(profileId),
   fetchToolPermissions: () => mockFetchToolPermissions(),
   fetchToolCalls: () => mockFetchToolCalls(),
   updateToolPermission: (toolName: string, level: string) =>
@@ -216,6 +284,10 @@ describe('App', () => {
     vi.clearAllMocks();
     window.matchMedia = defaultMatchMedia;
     mockFetchAgentConfig.mockResolvedValue(agentConfig);
+    mockFetchToolCatalog.mockResolvedValue({
+      items: [makeToolCatalogEntry()],
+    });
+    mockFetchToolPolicy.mockResolvedValue(makeToolPolicy());
     mockFetchToolPermissions.mockResolvedValue({
       workspace_root: '/workspace',
       items: [makeToolPermission()],
@@ -543,6 +615,11 @@ describe('App', () => {
       expect(screen.getByDisplayValue('ask')).toBeInTheDocument();
     });
 
+    expect(screen.getByLabelText(/policy profile/i)).toHaveValue('minimal');
+    expect(screen.getByText('Filesystem')).toBeInTheDocument();
+    expect(screen.getByText('low')).toBeInTheDocument();
+    expect(screen.getByText('enabled')).toBeInTheDocument();
+
     fireEvent.change(screen.getByDisplayValue('ask'), {
       target: { value: 'allow' },
     });
@@ -552,6 +629,33 @@ describe('App', () => {
     );
 
     expect(screen.getByText(/Root:/i)).toBeInTheDocument();
+  });
+
+  it('updates the active tool policy profile from the tools panel', async () => {
+    mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockUpdateToolPolicy.mockResolvedValueOnce(
+      makeToolPolicy({ profile_id: 'research' }),
+    );
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-sidebar-nav-tools')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-tools'));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/policy profile/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByLabelText(/policy profile/i), {
+      target: { value: 'research' },
+    });
+
+    await waitFor(() =>
+      expect(mockUpdateToolPolicy).toHaveBeenCalledWith('research'),
+    );
   });
 
   it('updates operational settings and keeps secrets out of the UI response', async () => {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -10,8 +11,11 @@ from app.models.entities import (
     Setting,
     Task,
     TaskRun,
+    ToolCacheEntry,
     ToolCall,
+    ToolPolicyOverride,
     ToolPermission,
+    ensure_utc,
     utc_now,
 )
 
@@ -40,12 +44,49 @@ class ToolingRepository:
         )
         return self.session.exec(statement).first()
 
+    def get_permission_any_status(self, agent_id: str, tool_name: str) -> ToolPermission | None:
+        statement = (
+            select(ToolPermission)
+            .where(
+                ToolPermission.agent_id == agent_id,
+                ToolPermission.tool_name == tool_name,
+            )
+            .order_by(ToolPermission.created_at.asc())
+        )
+        return self.session.exec(statement).first()
+
     def save_permission(self, permission: ToolPermission) -> ToolPermission:
         permission.updated_at = utc_now()
         self.session.add(permission)
         self.session.commit()
         self.session.refresh(permission)
         return permission
+
+    def upsert_permission(
+        self,
+        *,
+        agent_id: str,
+        tool_name: str,
+        permission_level: str,
+        workspace_path: str | None,
+        approval_required: bool,
+    ) -> ToolPermission:
+        permission = self.get_permission_any_status(agent_id, tool_name)
+        if permission is None:
+            permission = ToolPermission(
+                agent_id=agent_id,
+                tool_name=tool_name,
+                workspace_path=workspace_path,
+                permission_level=permission_level,
+                approval_required=approval_required,
+                status="active",
+            )
+        else:
+            permission.workspace_path = workspace_path
+            permission.permission_level = permission_level
+            permission.approval_required = approval_required
+            permission.status = "active"
+        return self.save_permission(permission)
 
     def list_tool_calls(self, agent_id: str, limit: int = 50) -> list[ToolCall]:
         statement = (
@@ -66,6 +107,71 @@ class ToolingRepository:
             Setting.status == "active",
         )
         return self.session.exec(statement).first()
+
+    def upsert_setting(
+        self,
+        *,
+        scope: str,
+        key: str,
+        value_type: str,
+        value_text: str | None = None,
+        value_json: str | None = None,
+    ) -> Setting:
+        setting = self.get_setting(scope, key)
+        if setting is None:
+            setting = Setting(
+                scope=scope,
+                key=key,
+                value_type=value_type,
+                value_text=value_text,
+                value_json=value_json,
+                status="active",
+            )
+        else:
+            setting.value_type = value_type
+            setting.value_text = value_text
+            setting.value_json = value_json
+            setting.status = "active"
+            setting.updated_at = utc_now()
+
+        self.session.add(setting)
+        self.session.commit()
+        self.session.refresh(setting)
+        return setting
+
+    def list_overrides(self, agent_id: str) -> list[ToolPolicyOverride]:
+        statement = (
+            select(ToolPolicyOverride)
+            .where(
+                ToolPolicyOverride.agent_id == agent_id,
+                ToolPolicyOverride.status == "active",
+            )
+            .order_by(ToolPolicyOverride.tool_name.asc())
+        )
+        return list(self.session.exec(statement))
+
+    def get_override(self, agent_id: str, tool_name: str) -> ToolPolicyOverride | None:
+        statement = (
+            select(ToolPolicyOverride)
+            .where(
+                ToolPolicyOverride.agent_id == agent_id,
+                ToolPolicyOverride.tool_name == tool_name,
+                ToolPolicyOverride.status == "active",
+            )
+            .order_by(ToolPolicyOverride.created_at.asc())
+        )
+        return self.session.exec(statement).first()
+
+    def save_override(self, override: ToolPolicyOverride) -> ToolPolicyOverride:
+        override.updated_at = utc_now()
+        self.session.add(override)
+        self.session.commit()
+        self.session.refresh(override)
+        return override
+
+    def delete_override(self, override: ToolPolicyOverride) -> None:
+        self.session.delete(override)
+        self.session.commit()
 
     def create_tool_call(
         self,
@@ -172,3 +278,55 @@ class ToolingRepository:
         self.session.commit()
         self.session.refresh(approval)
         return approval
+
+    def get_cache_entry(self, tool_name: str, cache_key: str) -> ToolCacheEntry | None:
+        statement = (
+            select(ToolCacheEntry)
+            .where(
+                ToolCacheEntry.tool_name == tool_name,
+                ToolCacheEntry.cache_key == cache_key,
+                ToolCacheEntry.status == "active",
+            )
+            .order_by(ToolCacheEntry.created_at.asc())
+        )
+        return self.session.exec(statement).first()
+
+    def get_valid_cache_payload(self, tool_name: str, cache_key: str) -> dict | None:
+        entry = self.get_cache_entry(tool_name, cache_key)
+        if entry is None:
+            return None
+        if ensure_utc(entry.expires_at) <= datetime.now(UTC):
+            return None
+        try:
+            parsed = json.loads(entry.value_json)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def save_cache_payload(
+        self,
+        *,
+        tool_name: str,
+        cache_key: str,
+        payload: dict[str, object],
+        ttl_seconds: int,
+    ) -> ToolCacheEntry:
+        entry = self.get_cache_entry(tool_name, cache_key)
+        expires_at = datetime.now(UTC) + timedelta(seconds=max(ttl_seconds, 1))
+        if entry is None:
+            entry = ToolCacheEntry(
+                tool_name=tool_name,
+                cache_key=cache_key,
+                value_json=json.dumps(payload, ensure_ascii=False),
+                expires_at=expires_at,
+                status="active",
+            )
+        else:
+            entry.value_json = json.dumps(payload, ensure_ascii=False)
+            entry.expires_at = expires_at
+            entry.status = "active"
+        entry.updated_at = utc_now()
+        self.session.add(entry)
+        self.session.commit()
+        self.session.refresh(entry)
+        return entry

@@ -15,6 +15,7 @@ from app.models.entities import (
     ToolPermission,
     utc_now,
 )
+from app.tools.catalog import build_tool_catalog
 
 
 class OperationalSettingsRepository:
@@ -84,13 +85,16 @@ class OperationalSettingsRepository:
         return profile
 
     def update_workspace_permissions(self, agent_id: str, workspace_path: str) -> None:
+        workspace_tools = {
+            item.id for item in build_tool_catalog() if item.requires_workspace
+        }
         statement = select(ToolPermission).where(
             ToolPermission.agent_id == agent_id,
             ToolPermission.status == "active",
         )
         permissions = list(self.session.exec(statement))
         for permission in permissions:
-            if permission.tool_name.startswith(("list_", "read_", "write_", "edit_")):
+            if permission.tool_name in workspace_tools:
                 permission.workspace_path = workspace_path
                 permission.updated_at = utc_now()
                 self.session.add(permission)

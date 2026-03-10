@@ -135,6 +135,18 @@ class ToolPermission(TimestampedModel, table=True):
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
 
 
+class ToolPolicyOverride(TimestampedModel, table=True):
+    __tablename__ = "tool_policy_overrides"
+
+    __table_args__ = (UniqueConstraint("agent_id", "tool_name"),)
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    agent_id: str = Field(foreign_key="agents.id", max_length=36, nullable=False, index=True)
+    tool_name: str = Field(sa_column=Column(String(100), nullable=False))
+    permission_level: str = Field(default="ask", sa_column=Column(String(50), nullable=False))
+    status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
+
+
 class ToolCall(TimestampedModel, table=True):
     __tablename__ = "tool_calls"
 
@@ -151,6 +163,19 @@ class ToolCall(TimestampedModel, table=True):
     output_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     started_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     finished_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+
+
+class ToolCacheEntry(TimestampedModel, table=True):
+    __tablename__ = "tool_cache_entries"
+
+    __table_args__ = (UniqueConstraint("tool_name", "cache_key"),)
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    tool_name: str = Field(sa_column=Column(String(100), nullable=False, index=True))
+    cache_key: str = Field(sa_column=Column(String(255), nullable=False))
+    value_json: str = Field(sa_column=Column(Text, nullable=False))
+    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
 
 
 class CronJob(TimestampedModel, table=True):
