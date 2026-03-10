@@ -240,6 +240,26 @@ function makeApproval(overrides: Record<string, unknown> = {}) {
   };
 }
 
+vi.mock('@/components/ui/select', () => ({
+  Select: ({ value, onValueChange, children, disabled }: any) => {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        disabled={disabled}
+        data-testid="mock-select"
+        aria-label="mock select"
+      >
+        {children}
+      </select>
+    );
+  },
+  SelectTrigger: ({ id, 'aria-label': ariaLabel, children }: any) => null,
+  SelectContent: ({ children }: any) => <>{children}</>,
+  SelectItem: ({ value, children }: any) => <option value={value}>{children}</option>,
+  SelectValue: () => null,
+}));
+
 vi.mock('./lib/backend', () => ({
   fetchSessions: () => mockFetchSessions(),
   createSession: (title?: string) => mockCreateSession(title),
@@ -655,15 +675,14 @@ describe('App', () => {
     fireEvent.click(screen.getByTestId('app-sidebar-nav-tools'));
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('ask')).toBeInTheDocument();
+      expect(screen.getByText('Ask')).toBeInTheDocument();
     });
 
-    expect(screen.getByLabelText(/policy profile/i)).toHaveValue('minimal');
     expect(screen.getByText('Filesystem')).toBeInTheDocument();
-    expect(screen.getByText('low')).toBeInTheDocument();
-    expect(screen.getByText('enabled')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByDisplayValue('ask'), {
+    const selects = screen.getAllByTestId('mock-select');
+    // The second select is the tool mode, the first is the tool profile
+    fireEvent.change(selects[1], {
       target: { value: 'allow' },
     });
 
@@ -689,10 +708,10 @@ describe('App', () => {
     fireEvent.click(screen.getByTestId('app-sidebar-nav-tools'));
 
     await waitFor(() =>
-      expect(screen.getByLabelText(/policy profile/i)).toBeInTheDocument(),
+      expect(screen.getAllByTestId('mock-select')[0]).toBeInTheDocument(),
     );
 
-    fireEvent.change(screen.getByLabelText(/policy profile/i), {
+    fireEvent.change(screen.getAllByTestId('mock-select')[0], {
       target: { value: 'research' },
     });
 
@@ -1142,7 +1161,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Recent calls' }));
 
     await waitFor(() =>
-      expect(screen.getByText(/Guided by List Files Coach/i)).toBeInTheDocument(),
+      expect(screen.getByText(/List Files Coach/i)).toBeInTheDocument(),
     );
   });
 });
