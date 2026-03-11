@@ -54,7 +54,11 @@ class LocalScheduler:
                 executor.run_job(job)
 
             last_heartbeat = repository.get_setting("heartbeat", "last_run_at")
-            if self._heartbeat_due(last_heartbeat.value_text if last_heartbeat else None):
+            heartbeat_interval_seconds = self._heartbeat_interval_seconds(repository)
+            if self._heartbeat_due(
+                last_heartbeat.value_text if last_heartbeat else None,
+                heartbeat_interval_seconds,
+            ):
                 executor.run_heartbeat(
                     stale_after_seconds=self.settings.stale_task_run_seconds,
                 )
@@ -68,7 +72,20 @@ class LocalScheduler:
                 job.next_run_at = parsed.next_after(reference_utc=now, last_run_at=job.last_run_at)
                 repository.save_cron_job(job)
 
-    def _heartbeat_due(self, last_run_at: str | None) -> bool:
+    def _heartbeat_interval_seconds(self, repository: CronJobRepository) -> float:
+        setting = repository.get_setting("runtime", "heartbeat_interval_seconds")
+        if setting is None or not setting.value_text:
+            return float(self.settings.default_heartbeat_interval_seconds)
+        try:
+            return float(setting.value_text)
+        except ValueError:
+            return float(self.settings.default_heartbeat_interval_seconds)
+
+    def _heartbeat_due(
+        self,
+        last_run_at: str | None,
+        heartbeat_interval_seconds: float,
+    ) -> bool:
         if not last_run_at:
             return True
         try:
@@ -79,4 +96,4 @@ class LocalScheduler:
             return True
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        return (utc_now() - parsed).total_seconds() >= self.settings.heartbeat_interval_seconds
+        return (utc_now() - parsed).total_seconds() >= heartbeat_interval_seconds

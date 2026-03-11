@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -25,9 +25,30 @@ class KernelSoul:
 
 @dataclass(frozen=True)
 class KernelSkill:
+    key: str
     name: str
+    description: str
+    origin: str
+    source_path: str
     content: str
-    source_document_id: str
+    config: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class KernelSkillSummary:
+    key: str
+    name: str
+    origin: str
+    source_path: str
+    selected: bool
+    eligible: bool
+    blocked_reasons: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class KernelSkillResolution:
+    strategy: str
+    items: list[KernelSkillSummary] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -60,8 +81,10 @@ class KernelRuntime:
     task_id: str
     task_run_id: str
     trigger_message_id: str | None
+    skill_resolution: KernelSkillResolution
     settings: dict[str, str]
     started_at: datetime
+    environment_overlay: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)

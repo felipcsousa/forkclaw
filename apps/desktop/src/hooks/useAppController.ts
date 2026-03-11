@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -19,6 +20,7 @@ import {
   fetchAgentConfig,
   fetchCronJobsDashboard,
   fetchOperationalSettings,
+  fetchSkills,
   fetchToolCatalog,
   fetchSessionMessages,
   fetchSessions,
@@ -31,6 +33,7 @@ import {
   sendSessionMessage,
   updateAgentConfig,
   updateOperationalSettings,
+  updateSkill,
   updateToolPolicy,
   updateToolPermission,
   type ActivityTimelineItemRecord,
@@ -44,6 +47,7 @@ import {
   type OperationalSettingsRecord,
   type OperationalSettingsUpdate,
   type SessionRecord,
+  type SkillRecord,
   type TaskRunHistoryRecord,
   type ToolCatalogEntryRecord,
   type ToolCallRecord,
@@ -72,6 +76,7 @@ const emptyOperationalDraft: OperationalSettingsUpdate = {
   monthly_budget_usd: 200,
   default_view: 'chat',
   activity_poll_seconds: 3,
+  heartbeat_interval_seconds: 1800,
   api_key: '',
   clear_api_key: false,
 };
@@ -108,6 +113,7 @@ function toOperationalDraft(
     monthly_budget_usd: settings.monthly_budget_usd,
     default_view: settings.default_view,
     activity_poll_seconds: settings.activity_poll_seconds,
+    heartbeat_interval_seconds: settings.heartbeat_interval_seconds,
     api_key: '',
     clear_api_key: false,
   };
@@ -150,6 +156,8 @@ export function useAppController() {
     ToolPermissionRecord[]
   >([]);
   const [toolCalls, setToolCalls] = useState<ToolCallRecord[]>([]);
+  const [skillsStrategy, setSkillsStrategy] = useState('all_eligible');
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobRecord[]>([]);
   const [jobHistory, setJobHistory] = useState<TaskRunHistoryRecord[]>([]);
@@ -169,7 +177,7 @@ export function useAppController() {
   const [isActingOnApproval, setIsActingOnApproval] = useState(false);
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [isMutatingJob, setIsMutatingJob] = useState(false);
-  const [hasAppliedDefaultView, setHasAppliedDefaultView] = useState(false);
+  const hasAppliedDefaultViewRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => {
@@ -230,12 +238,12 @@ export function useAppController() {
     setOperationalSettings(response);
     setOperationalDraft(toOperationalDraft(response));
     setView((current) =>
-      !hasAppliedDefaultView && current === 'chat'
+      !hasAppliedDefaultViewRef.current && current === 'chat'
         ? response.default_view
         : current,
     );
-    setHasAppliedDefaultView(true);
-  }, [hasAppliedDefaultView, runAsyncAction]);
+    hasAppliedDefaultViewRef.current = true;
+  }, [runAsyncAction]);
 
   const loadSession = useCallback(
     async (session: SessionRecord) => {
@@ -264,17 +272,20 @@ export function useAppController() {
           policyResponse,
           permissionsResponse,
           callsResponse,
+          skillsResponse,
         ] = await Promise.all([
           fetchToolCatalog(),
           fetchToolPolicy(),
           fetchToolPermissions(),
           fetchToolCalls(),
+          fetchSkills(),
         ]);
         return {
           catalogResponse,
           policyResponse,
           permissionsResponse,
           callsResponse,
+          skillsResponse,
         };
       },
       {
@@ -291,7 +302,30 @@ export function useAppController() {
     setWorkspaceRoot(response.permissionsResponse.workspace_root);
     setToolPermissions(response.permissionsResponse.items);
     setToolCalls(response.callsResponse.items);
+    setSkillsStrategy(response.skillsResponse.strategy);
+    setSkills(response.skillsResponse.items);
   }, [runAsyncAction]);
+
+  const applyToolingSnapshot = useCallback(
+    (response: {
+      policyResponse: ToolPolicyRecord;
+      permissionsResponse: {
+        workspace_root: string;
+        items: ToolPermissionRecord[];
+      };
+      skillsResponse: {
+        strategy: string;
+        items: SkillRecord[];
+      };
+    }) => {
+      setToolPolicy(response.policyResponse);
+      setWorkspaceRoot(response.permissionsResponse.workspace_root);
+      setToolPermissions(response.permissionsResponse.items);
+      setSkillsStrategy(response.skillsResponse.strategy);
+      setSkills(response.skillsResponse.items);
+    },
+    [],
+  );
 
   const loadApprovals = useCallback(async () => {
     const response = await runAsyncAction(() => fetchApprovals(), {
@@ -636,11 +670,13 @@ export function useAppController() {
   ) {
     const updated = await runAsyncAction(
       async () => {
-        const [permission, policy] = await Promise.all([
-          updateToolPermission(toolName, permissionLevel),
+        await updateToolPermission(toolName, permissionLevel);
+        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
           fetchToolPolicy(),
+          fetchToolPermissions(),
+          fetchSkills(),
         ]);
-        return { permission, policy };
+        return { policyResponse, permissionsResponse, skillsResponse };
       },
       {
         setPending: setIsUpdatingToolPermission,
@@ -651,22 +687,19 @@ export function useAppController() {
       return;
     }
 
-    setToolPolicy(updated.policy);
-    setToolPermissions((current) =>
-      current.map((item) =>
-        item.id === updated.permission.id ? updated.permission : item,
-      ),
-    );
+    applyToolingSnapshot(updated);
   }
 
   async function handleChangeToolPolicyProfile(profileId: ToolPolicyProfileId) {
     const updated = await runAsyncAction(
       async () => {
-        const [policy, permissionsResponse] = await Promise.all([
-          updateToolPolicy(profileId),
+        await updateToolPolicy(profileId);
+        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
+          fetchToolPolicy(),
           fetchToolPermissions(),
+          fetchSkills(),
         ]);
-        return { policy, permissionsResponse };
+        return { policyResponse, permissionsResponse, skillsResponse };
       },
       {
         setPending: setIsUpdatingToolPermission,
@@ -677,9 +710,24 @@ export function useAppController() {
       return;
     }
 
-    setToolPolicy(updated.policy);
-    setWorkspaceRoot(updated.permissionsResponse.workspace_root);
-    setToolPermissions(updated.permissionsResponse.items);
+    applyToolingSnapshot(updated);
+  }
+
+  async function handleToggleSkill(skillKey: string, enabled: boolean) {
+    const updated = await runAsyncAction(
+      () => updateSkill(skillKey, { enabled }),
+      {
+        setPending: setIsUpdatingToolPermission,
+        errorMessage: 'Failed to update skill settings.',
+      },
+    );
+    if (!updated) {
+      return;
+    }
+
+    setSkills((current) =>
+      current.map((item) => (item.key === updated.key ? updated : item)),
+    );
   }
 
   async function handleApproveApproval(approvalId: string) {
@@ -930,10 +978,13 @@ export function useAppController() {
     setDraft,
     setErrorMessage,
     setMobileNavOpen,
+    skills,
+    skillsStrategy,
     toolCalls,
     toolCatalog,
     toolPolicy,
     toolPermissions,
+    handleToggleSkill,
     view,
     workspaceRoot,
   };

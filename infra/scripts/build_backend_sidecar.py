@@ -45,6 +45,8 @@ def main() -> None:
         f"{backend_root / 'alembic'}{os.pathsep}alembic",
         "--add-data",
         f"{backend_root / 'alembic.ini'}{os.pathsep}.",
+        "--add-data",
+        f"{backend_root / 'app' / 'skills' / 'bundled'}{os.pathsep}app/skills/bundled",
         str(backend_root / "app" / "entrypoints" / "sidecar.py"),
     ]
     subprocess.run(command, cwd=backend_root, check=True)

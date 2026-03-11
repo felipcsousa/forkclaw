@@ -4,7 +4,11 @@ import json
 
 from sqlmodel import Session, select
 
-from app.core.agent_profile_defaults import DEFAULT_AGENT_PROFILE, summarize_persona
+from app.core.agent_profile_defaults import (
+    DEFAULT_AGENT_PROFILE,
+    LEGACY_AGENT_PROFILE,
+    summarize_persona,
+)
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.models.entities import (
@@ -37,9 +41,12 @@ def seed_default_data(session: Session) -> Agent:
         session.add(existing_agent)
         session.flush()
     else:
-        if not existing_agent.name:
+        if not existing_agent.name or existing_agent.name == LEGACY_AGENT_PROFILE.name:
             existing_agent.name = DEFAULT_AGENT_PROFILE.name
-        if not existing_agent.description:
+        if (
+            not existing_agent.description
+            or existing_agent.description == LEGACY_AGENT_PROFILE.description
+        ):
             existing_agent.description = DEFAULT_AGENT_PROFILE.description
 
     profile = session.exec(
@@ -65,15 +72,21 @@ def seed_default_data(session: Session) -> Agent:
             profile.model_provider = DEFAULT_AGENT_PROFILE.model_provider
         if not profile.model_name:
             profile.model_name = DEFAULT_AGENT_PROFILE.model_name
-        if not profile.display_name:
+        if not profile.display_name or profile.display_name == LEGACY_AGENT_PROFILE.display_name:
             profile.display_name = DEFAULT_AGENT_PROFILE.display_name
-        if not profile.identity_text:
+        if not profile.identity_text or profile.identity_text == LEGACY_AGENT_PROFILE.identity_text:
             profile.identity_text = DEFAULT_AGENT_PROFILE.identity_text
-        if not profile.soul_text:
+        if not profile.soul_text or profile.soul_text == LEGACY_AGENT_PROFILE.soul_text:
             profile.soul_text = DEFAULT_AGENT_PROFILE.soul_text
-        if not profile.user_context_text:
+        if (
+            profile.user_context_text is None
+            or profile.user_context_text == LEGACY_AGENT_PROFILE.user_context_text
+        ):
             profile.user_context_text = DEFAULT_AGENT_PROFILE.user_context_text
-        if not profile.policy_base_text:
+        if (
+            not profile.policy_base_text
+            or profile.policy_base_text == LEGACY_AGENT_PROFILE.policy_base_text
+        ):
             profile.policy_base_text = DEFAULT_AGENT_PROFILE.policy_base_text
         profile.persona = summarize_persona(profile.soul_text)
         profile.system_prompt = profile.soul_text
@@ -89,6 +102,10 @@ def seed_default_data(session: Session) -> Agent:
             "runtime",
             "max_iterations_per_execution",
         ): ("integer", str(settings.default_max_iterations_per_execution)),
+        (
+            "runtime",
+            "heartbeat_interval_seconds",
+        ): ("integer", str(settings.default_heartbeat_interval_seconds)),
         ("budget", "daily_usd"): ("float", f"{settings.default_daily_budget_usd:.6f}"),
         ("budget", "monthly_usd"): ("float", f"{settings.default_monthly_budget_usd:.6f}"),
         ("preferences", "default_view"): ("string", settings.default_app_view),

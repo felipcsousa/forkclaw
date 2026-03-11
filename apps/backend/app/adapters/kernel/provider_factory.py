@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from nanobot.providers import LiteLLMProvider
@@ -14,6 +13,7 @@ from app.core.provider_catalog import (
     normalize_provider_id,
 )
 from app.core.secrets import get_secret_store
+from app.skills.runtime import runtime_env
 
 
 @dataclass(frozen=True)
@@ -30,20 +30,20 @@ def resolve_provider_name(provider_name: str | None) -> str:
 def resolve_provider_api_key(provider_name: str) -> str | None:
     canonical_name = resolve_provider_name(provider_name)
 
-    if canonical_name != "product_echo":
-        secret_value = get_secret_store().get_provider_api_key(canonical_name)
-        if secret_value:
-            return secret_value
-
     candidate_names = (
         get_provider_env_vars(canonical_name)
         if canonical_name == "kimi-coding"
         else ("NANOBOT_API_KEY", *get_provider_env_vars(canonical_name))
     )
     for name in candidate_names:
-        value = os.getenv(name)
+        value = runtime_env(name)
         if value:
             return value
+
+    if canonical_name != "product_echo":
+        secret_value = get_secret_store().get_provider_api_key(canonical_name)
+        if secret_value:
+            return secret_value
 
     return None
 
@@ -91,7 +91,7 @@ def build_provider(
     else:
         provider = LiteLLMProvider(
             api_key=api_key,
-            api_base=os.getenv("NANOBOT_API_BASE"),
+            api_base=runtime_env("NANOBOT_API_BASE"),
             default_model=model_name,
             provider_name=canonical_name,
         )

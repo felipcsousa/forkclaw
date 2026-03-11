@@ -13,7 +13,6 @@ from app.kernel.contracts import (
     KernelMessage,
     KernelRuntime,
     KernelSessionState,
-    KernelSkill,
     KernelSoul,
     KernelToolPolicy,
 )
@@ -22,7 +21,9 @@ from app.models.entities import Task, TaskRun, utc_now
 from app.repositories.agent_execution import AgentExecutionRepository
 from app.schemas.execution import AgentExecutionResponse
 from app.services.operational_settings import OperationalSettingsService
+from app.services.skills import SkillService
 from app.services.tools import ToolService
+from app.skills.runtime import runtime_env_overlay
 
 
 class AgentExecutionService:
@@ -76,10 +77,16 @@ class AgentExecutionService:
                 input_text=message,
                 trigger_message_id=user_message.id,
             )
-            tool_service = ToolService(self.session)
-            result = asyncio.run(
-                create_agent_kernel(tool_executor=tool_service).execute(request)
+            self.record_skill_resolution(
+                agent_id=agent.id,
+                task_run_id=task_run.id,
+                request=request,
             )
+            tool_service = ToolService(self.session)
+            with runtime_env_overlay(request.runtime.environment_overlay):
+                result = asyncio.run(
+                    create_agent_kernel(tool_executor=tool_service).execute(request)
+                )
             assistant_message = self.repository.create_message(
                 session_record.id,
                 "assistant",
@@ -91,6 +98,7 @@ class AgentExecutionService:
                 task=task,
                 task_run=task_run,
                 session_id=session_record.id,
+                request=request,
                 result=result,
             )
             return AgentExecutionResponse(
@@ -152,8 +160,10 @@ class AgentExecutionService:
                 history_cutoff_sequence,
             )
         settings = self.repository.list_settings()
-        skill_documents = self.repository.list_skill_documents(agent.id)
         tool_permissions = self.repository.list_tool_permissions(agent.id)
+        skill_bundle = SkillService(self.session).build_execution_bundle(
+            tool_permissions=tool_permissions,
+        )
 
         history = [
             KernelMessage(
@@ -181,14 +191,7 @@ class AgentExecutionService:
                 model_provider=runtime_config.provider,
                 model_name=runtime_config.model_name,
             ),
-            skills=[
-                KernelSkill(
-                    name=document.title,
-                    content=document.content_text,
-                    source_document_id=document.id,
-                )
-                for document in skill_documents
-            ],
+            skills=skill_bundle.skills,
             tools=[
                 KernelToolPolicy(
                     tool_name=permission.tool_name,
@@ -208,11 +211,13 @@ class AgentExecutionService:
                 task_id=task.id,
                 task_run_id=task_run.id,
                 trigger_message_id=trigger_message_id,
+                skill_resolution=SkillService.to_kernel_skill_resolution(skill_bundle),
                 settings={
                     f"{setting.scope}.{setting.key}": setting.value_text or setting.value_json or ""
                     for setting in settings
                 },
                 started_at=utc_now(),
+                environment_overlay=skill_bundle.environment_overlay,
             ),
             input_text=input_text,
         )
@@ -243,6 +248,7 @@ class AgentExecutionService:
         task: Task,
         task_run: TaskRun,
         session_id: str,
+        request: KernelExecutionRequest,
         result: KernelExecutionResult,
     ) -> TaskRun:
         return self._persist_execution_result(
@@ -250,6 +256,7 @@ class AgentExecutionService:
             task=task,
             task_run=task_run,
             session_id=session_id,
+            request=request,
             result=result,
         )
 
@@ -260,6 +267,7 @@ class AgentExecutionService:
         task: Task,
         task_run: TaskRun,
         session_id: str,
+        request: KernelExecutionRequest,
         result: KernelExecutionResult,
     ) -> TaskRun:
         output_json = json.dumps(
@@ -267,6 +275,7 @@ class AgentExecutionService:
                 "kernel_name": result.kernel_name,
                 "model_name": result.model_name,
                 "tools_used": result.tools_used,
+                "skills": self._serialize_skill_resolution(request),
                 "raw_payload": result.raw_payload,
                 "pending_approval_id": result.pending_approval_id,
                 "pending_tool_call_id": result.pending_tool_call_id,
@@ -336,6 +345,40 @@ class AgentExecutionService:
             summary_text="Execution completed successfully.",
         )
         return completed_run
+
+    def record_skill_resolution(
+        self,
+        *,
+        agent_id: str,
+        task_run_id: str,
+        request: KernelExecutionRequest,
+    ) -> None:
+        self.repository.record_audit_event(
+            agent_id=agent_id,
+            event_type="skills.resolved",
+            entity_type="task_run",
+            entity_id=task_run_id,
+            payload=self._serialize_skill_resolution(request),
+            summary_text="Execution skills resolved.",
+        )
+
+    @staticmethod
+    def _serialize_skill_resolution(request: KernelExecutionRequest) -> dict[str, object]:
+        return {
+            "strategy": request.runtime.skill_resolution.strategy,
+            "items": [
+                {
+                    "key": item.key,
+                    "name": item.name,
+                    "origin": item.origin,
+                    "source_path": item.source_path,
+                    "selected": item.selected,
+                    "eligible": item.eligible,
+                    "blocked_reasons": item.blocked_reasons,
+                }
+                for item in request.runtime.skill_resolution.items
+            ],
+        }
 
     @staticmethod
     def _extract_estimated_cost(result: KernelExecutionResult) -> float | None:

@@ -26,13 +26,17 @@ def _alembic_config() -> Config:
 def test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     database_path = tmp_path / "agent_os_test.db"
     workspace_root = tmp_path / "workspace"
+    bundled_skills_root = tmp_path / "bundled-skills"
     workspace_root.mkdir(parents=True, exist_ok=True)
+    bundled_skills_root.mkdir(parents=True, exist_ok=True)
     (workspace_root / "notes.txt").write_text("hello workspace", encoding="utf-8")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
     monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_WORKSPACE_ROOT", str(workspace_root))
+    monkeypatch.setenv("APP_BUNDLED_SKILLS_ROOT", str(bundled_skills_root))
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("SCHEDULER_POLL_INTERVAL_SECONDS", "0.2")
-    monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "0.4")
+    monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
     monkeypatch.setenv("STALE_TASK_RUN_SECONDS", "1")
     monkeypatch.setenv("APP_SECRET_BACKEND", "memory")
 

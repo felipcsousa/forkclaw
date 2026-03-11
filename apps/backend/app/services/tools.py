@@ -12,7 +12,8 @@ from app.kernel.contracts import KernelExecutionRequest
 from app.models.entities import ToolPermission, ToolPolicyOverride
 from app.repositories.agent_profile import AgentProfileRepository
 from app.repositories.tools import ToolingRepository
-from app.schemas.tool import PermissionLevel
+from app.schemas.skill import SkillSummaryRead
+from app.schemas.tool import PermissionLevel, ToolCallRead
 from app.tools.base import ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort
 from app.tools.catalog import ToolCatalogEntry, build_tool_catalog
 from app.tools.policies import (
@@ -47,7 +48,13 @@ class ToolService(ToolExecutionPort):
     def list_catalog(self) -> list[ToolCatalogEntry]:
         return self.catalog
 
-    def get_policy(self) -> tuple[ToolPolicyProfileId, list[ToolPolicyProfile], list[ToolPolicyOverride]]:
+    def get_policy(
+        self,
+    ) -> tuple[
+        ToolPolicyProfileId,
+        list[ToolPolicyProfile],
+        list[ToolPolicyOverride],
+    ]:
         agent = self._require_default_agent()
         self._materialize_permissions(agent.id)
         profile_id = self._active_profile_id()
@@ -118,7 +125,30 @@ class ToolService(ToolExecutionPort):
             msg = "Default agent not found."
             raise ValueError(msg)
         self._materialize_permissions(agent.id)
-        return self.repository.list_tool_calls(agent.id)
+        calls = self.repository.list_tool_calls(agent.id)
+        outputs = self.repository.get_task_run_outputs(
+            [call.task_run_id for call in calls if call.task_run_id]
+        )
+        return [
+            ToolCallRead(
+                id=call.id,
+                session_id=call.session_id,
+                message_id=call.message_id,
+                task_run_id=call.task_run_id,
+                tool_name=call.tool_name,
+                status=call.status,
+                input_json=call.input_json,
+                output_json=call.output_json,
+                started_at=call.started_at,
+                finished_at=call.finished_at,
+                created_at=call.created_at,
+                updated_at=call.updated_at,
+                guided_by_skills=self._skill_summaries_from_output(
+                    outputs.get(call.task_run_id or "")
+                ),
+            )
+            for call in calls
+        ]
 
     def describe_tools(
         self,
@@ -403,3 +433,27 @@ class ToolService(ToolExecutionPort):
         if permission.workspace_path:
             return Path(permission.workspace_path).resolve()
         return self._workspace_root()
+
+    @staticmethod
+    def _skill_summaries_from_output(output_json: str | None) -> list[SkillSummaryRead]:
+        if not output_json:
+            return []
+        try:
+            payload = json.loads(output_json)
+        except json.JSONDecodeError:
+            return []
+        skills = payload.get("skills")
+        if not isinstance(skills, dict):
+            return []
+        items = skills.get("items")
+        if not isinstance(items, list):
+            return []
+        summaries: list[SkillSummaryRead] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("selected"):
+                continue
+            try:
+                summaries.append(SkillSummaryRead.model_validate(item))
+            except Exception:
+                continue
+        return summaries

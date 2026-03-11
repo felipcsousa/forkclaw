@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.schemas.skill import SkillSummaryRead
 
 TimelineEntryType = Literal["message", "task", "tool_call", "approval", "status", "audit"]
 
@@ -45,6 +47,8 @@ class ActivityTimelineItemRead(BaseModel):
     error_message: str | None
     duration_ms: int | None
     estimated_cost_usd: float | None
+    skill_strategy: str | None = None
+    resolved_skills: list[SkillSummaryRead] = Field(default_factory=list)
     entries: list[ActivityTimelineEntryRead]
     audit_log: list[ActivityAuditEventRead]
 
