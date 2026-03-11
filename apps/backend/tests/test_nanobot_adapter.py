@@ -25,6 +25,7 @@ from app.kernel.contracts import (
     KernelSoul,
     KernelToolPolicy,
 )
+from app.skills.runtime import runtime_env_overlay
 from app.tools.base import ToolExecutionOutcome
 from app.tools.registry import build_tool_registry
 
@@ -268,12 +269,41 @@ def test_provider_factory_falls_back_to_existing_providers() -> None:
     assert resolved_openai.tool_format == "openai"
 
 
-def test_kimi_secret_resolution_prefers_keychain_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kimi_secret_resolution_prefers_runtime_env_over_keychain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     get_secret_store().set_provider_api_key("kimi-coding", "keychain-secret")
     monkeypatch.setenv("KIMI_CODING_API_KEY", "env-secret")
     monkeypatch.setenv("KIMI_API_KEY", "env-alias-secret")
 
-    assert NanobotKernelAdapter._resolve_api_key("kimi-coding") == "keychain-secret"
+    assert NanobotKernelAdapter._resolve_api_key("kimi-coding") == "env-secret"
+
+
+def test_provider_factory_prefers_runtime_overlay_secret_over_keychain() -> None:
+    get_secret_store().set_provider_api_key("openai", "keychain-secret")
+
+    with runtime_env_overlay({"OPENAI_API_KEY": "overlay-secret"}):
+        resolved_openai = build_provider(
+            provider_name="openai",
+            model_name="gpt-4o-mini",
+            product_echo_factory=lambda: object(),
+        )
+
+    assert isinstance(resolved_openai.provider, LiteLLMProvider)
+    assert resolved_openai.provider.api_key == "overlay-secret"
+
+
+def test_provider_factory_falls_back_to_keychain_without_runtime_overlay() -> None:
+    get_secret_store().set_provider_api_key("openai", "keychain-secret")
+
+    resolved_openai = build_provider(
+        provider_name="openai",
+        model_name="gpt-4o-mini",
+        product_echo_factory=lambda: object(),
+    )
+
+    assert isinstance(resolved_openai.provider, LiteLLMProvider)
+    assert resolved_openai.provider.api_key == "keychain-secret"
 
 
 def test_kimi_secret_resolution_uses_explicit_env_fallbacks(

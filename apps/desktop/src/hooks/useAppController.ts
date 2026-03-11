@@ -306,6 +306,27 @@ export function useAppController() {
     setSkills(response.skillsResponse.items);
   }, [runAsyncAction]);
 
+  const applyToolingSnapshot = useCallback(
+    (response: {
+      policyResponse: ToolPolicyRecord;
+      permissionsResponse: {
+        workspace_root: string;
+        items: ToolPermissionRecord[];
+      };
+      skillsResponse: {
+        strategy: string;
+        items: SkillRecord[];
+      };
+    }) => {
+      setToolPolicy(response.policyResponse);
+      setWorkspaceRoot(response.permissionsResponse.workspace_root);
+      setToolPermissions(response.permissionsResponse.items);
+      setSkillsStrategy(response.skillsResponse.strategy);
+      setSkills(response.skillsResponse.items);
+    },
+    [],
+  );
+
   const loadApprovals = useCallback(async () => {
     const response = await runAsyncAction(() => fetchApprovals(), {
       setPending: setIsLoadingApprovals,
@@ -649,11 +670,13 @@ export function useAppController() {
   ) {
     const updated = await runAsyncAction(
       async () => {
-        const [permission, policy] = await Promise.all([
-          updateToolPermission(toolName, permissionLevel),
+        await updateToolPermission(toolName, permissionLevel);
+        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
           fetchToolPolicy(),
+          fetchToolPermissions(),
+          fetchSkills(),
         ]);
-        return { permission, policy };
+        return { policyResponse, permissionsResponse, skillsResponse };
       },
       {
         setPending: setIsUpdatingToolPermission,
@@ -664,22 +687,19 @@ export function useAppController() {
       return;
     }
 
-    setToolPolicy(updated.policy);
-    setToolPermissions((current) =>
-      current.map((item) =>
-        item.id === updated.permission.id ? updated.permission : item,
-      ),
-    );
+    applyToolingSnapshot(updated);
   }
 
   async function handleChangeToolPolicyProfile(profileId: ToolPolicyProfileId) {
     const updated = await runAsyncAction(
       async () => {
-        const [policy, permissionsResponse] = await Promise.all([
-          updateToolPolicy(profileId),
+        await updateToolPolicy(profileId);
+        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
+          fetchToolPolicy(),
           fetchToolPermissions(),
+          fetchSkills(),
         ]);
-        return { policy, permissionsResponse };
+        return { policyResponse, permissionsResponse, skillsResponse };
       },
       {
         setPending: setIsUpdatingToolPermission,
@@ -690,9 +710,7 @@ export function useAppController() {
       return;
     }
 
-    setToolPolicy(updated.policy);
-    setWorkspaceRoot(updated.permissionsResponse.workspace_root);
-    setToolPermissions(updated.permissionsResponse.items);
+    applyToolingSnapshot(updated);
   }
 
   async function handleToggleSkill(skillKey: string, enabled: boolean) {

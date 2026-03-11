@@ -665,6 +665,39 @@ describe('App', () => {
       approval_required: false,
       updated_at: '2026-03-08T12:10:00Z',
     });
+    mockFetchToolPolicy
+      .mockResolvedValueOnce(makeToolPolicy())
+      .mockResolvedValueOnce(makeToolPolicy());
+    mockFetchToolPermissions
+      .mockResolvedValueOnce({
+        workspace_root: '/workspace',
+        items: [makeToolPermission()],
+      })
+      .mockResolvedValueOnce({
+        workspace_root: '/workspace',
+        items: [
+          makeToolPermission({
+            permission_level: 'allow',
+            approval_required: false,
+            updated_at: '2026-03-08T12:10:00Z',
+          }),
+        ],
+      });
+    mockFetchSkills
+      .mockResolvedValueOnce({
+        strategy: 'all_eligible',
+        items: [makeSkill()],
+      })
+      .mockResolvedValueOnce({
+        strategy: 'all_eligible',
+        items: [
+          makeSkill({
+            eligible: false,
+            selected: false,
+            blocked_reasons: ['missing_tools'],
+          }),
+        ],
+      });
 
     renderApp();
 
@@ -690,6 +723,16 @@ describe('App', () => {
       expect(mockUpdateToolPermission).toHaveBeenCalledWith('list_files', 'allow'),
     );
 
+    await waitFor(() =>
+      expect(mockFetchSkills).toHaveBeenCalledTimes(2),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
+
+    await waitFor(() =>
+      expect(screen.getAllByText('missing_tools').length).toBeGreaterThan(0),
+    );
+
     expect(screen.getByText(/Root:/i)).toBeInTheDocument();
   });
 
@@ -698,6 +741,33 @@ describe('App', () => {
     mockUpdateToolPolicy.mockResolvedValueOnce(
       makeToolPolicy({ profile_id: 'research' }),
     );
+    mockFetchToolPolicy
+      .mockResolvedValueOnce(makeToolPolicy())
+      .mockResolvedValueOnce(makeToolPolicy({ profile_id: 'research' }));
+    mockFetchToolPermissions
+      .mockResolvedValueOnce({
+        workspace_root: '/workspace',
+        items: [makeToolPermission()],
+      })
+      .mockResolvedValueOnce({
+        workspace_root: '/workspace',
+        items: [makeToolPermission({ permission_level: 'allow', approval_required: false })],
+      });
+    mockFetchSkills
+      .mockResolvedValueOnce({
+        strategy: 'all_eligible',
+        items: [makeSkill()],
+      })
+      .mockResolvedValueOnce({
+        strategy: 'all_eligible',
+        items: [
+          makeSkill({
+            eligible: false,
+            selected: false,
+            blocked_reasons: ['missing_tools'],
+          }),
+        ],
+      });
 
     renderApp();
 
@@ -717,6 +787,16 @@ describe('App', () => {
 
     await waitFor(() =>
       expect(mockUpdateToolPolicy).toHaveBeenCalledWith('research'),
+    );
+
+    await waitFor(() =>
+      expect(mockFetchSkills).toHaveBeenCalledTimes(2),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }));
+
+    await waitFor(() =>
+      expect(screen.getAllByText('missing_tools').length).toBeGreaterThan(0),
     );
   });
 

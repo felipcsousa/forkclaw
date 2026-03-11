@@ -30,11 +30,6 @@ def resolve_provider_name(provider_name: str | None) -> str:
 def resolve_provider_api_key(provider_name: str) -> str | None:
     canonical_name = resolve_provider_name(provider_name)
 
-    if canonical_name != "product_echo":
-        secret_value = get_secret_store().get_provider_api_key(canonical_name)
-        if secret_value:
-            return secret_value
-
     candidate_names = (
         get_provider_env_vars(canonical_name)
         if canonical_name == "kimi-coding"
@@ -44,6 +39,11 @@ def resolve_provider_api_key(provider_name: str) -> str | None:
         value = runtime_env(name)
         if value:
             return value
+
+    if canonical_name != "product_echo":
+        secret_value = get_secret_store().get_provider_api_key(canonical_name)
+        if secret_value:
+            return secret_value
 
     return None
 
@@ -89,7 +89,7 @@ def build_provider(
             default_model=model_name,
         )
     else:
-            provider = LiteLLMProvider(
+        provider = LiteLLMProvider(
             api_key=api_key,
             api_base=runtime_env("NANOBOT_API_BASE"),
             default_model=model_name,
