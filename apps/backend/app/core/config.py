@@ -38,6 +38,12 @@ class Settings:
     web_fetch_cache_ttl_seconds: int
     web_fetch_max_response_bytes: int
     web_fetch_default_max_chars: int
+    bootstrap_token: str | None
+    subagent_max_concurrency_per_session: int
+    subagent_worker_poll_interval_seconds: float
+    subagent_run_timeout_seconds: float
+    subagent_max_run_timeout_seconds: float
+    subagent_stuck_grace_seconds: float
 
     def ensure_data_dir(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -105,6 +111,22 @@ def _build_settings() -> Settings:
             os.getenv("WEB_FETCH_MAX_RESPONSE_BYTES", str(512 * 1024))
         ),
         web_fetch_default_max_chars=int(os.getenv("WEB_FETCH_DEFAULT_MAX_CHARS", "8000")),
+        bootstrap_token=(os.getenv("APP_BOOTSTRAP_TOKEN", "").strip() or None),
+        subagent_max_concurrency_per_session=int(
+            os.getenv("SUBAGENT_MAX_CONCURRENCY_PER_SESSION", "3")
+        ),
+        subagent_worker_poll_interval_seconds=float(
+            os.getenv("SUBAGENT_WORKER_POLL_INTERVAL_SECONDS", "0.2")
+        ),
+        subagent_run_timeout_seconds=float(
+            os.getenv("SUBAGENT_RUN_TIMEOUT_SECONDS", "3.0")
+        ),
+        subagent_max_run_timeout_seconds=float(
+            os.getenv("SUBAGENT_MAX_RUN_TIMEOUT_SECONDS", "30.0")
+        ),
+        subagent_stuck_grace_seconds=float(
+            os.getenv("SUBAGENT_STUCK_GRACE_SECONDS", "2.0")
+        ),
     )
 
 

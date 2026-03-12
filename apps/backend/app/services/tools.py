@@ -165,6 +165,34 @@ class ToolService(ToolExecutionPort):
         tool_call: ToolCallRequest,
         approval_override: bool = False,
     ) -> ToolExecutionOutcome:
+        allowed_tool_names = {tool.tool_name for tool in request.tools}
+        if tool_call.name not in allowed_tool_names:
+            tool_record = self.repository.create_tool_call(
+                session_id=request.session.session_id,
+                message_id=request.runtime.trigger_message_id,
+                task_run_id=request.runtime.task_run_id,
+                tool_name=tool_call.name,
+                input_payload=tool_call.arguments,
+            )
+            self.repository.update_tool_call(
+                tool_record,
+                status="denied",
+                output_payload={"message": "Tool is outside the delegated scope."},
+            )
+            self.repository.record_audit_event(
+                agent_id=request.identity.agent_id,
+                event_type="tool_call.denied",
+                entity_type="tool_call",
+                entity_id=tool_record.id,
+                payload={"tool_name": tool_call.name, "reason": "outside_scope"},
+            )
+            return ToolExecutionOutcome(
+                tool_call_id=tool_record.id,
+                tool_name=tool_call.name,
+                status="denied",
+                output_text=f"Tool `{tool_call.name}` is outside the delegated scope.",
+            )
+
         self._materialize_permissions(request.identity.agent_id)
         permission = self.repository.get_permission(request.identity.agent_id, tool_call.name)
         tool_record = self.repository.create_tool_call(

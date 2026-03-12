@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from app.kernel.contracts import (
     KernelMessage,
     KernelToolPolicy,
 )
+from app.kernel.errors import KernelExecutionCancelledError
 from app.tools.base import ToolExecutionPort
 
 
@@ -198,8 +200,14 @@ class NanobotPromptBuilder:
 class NanobotKernelAdapter(AgentKernelPort):
     kernel_name = "nanobot"
 
-    def __init__(self, tool_executor: ToolExecutionPort | None = None):
+    def __init__(
+        self,
+        tool_executor: ToolExecutionPort | None = None,
+        *,
+        cancellation_probe: Callable[[], bool] | None = None,
+    ):
         self.tool_executor = tool_executor
+        self.cancellation_probe = cancellation_probe
 
     async def execute(self, request: KernelExecutionRequest) -> KernelExecutionResult:
         resolved_provider = self._resolve_provider(request)
@@ -268,6 +276,7 @@ class NanobotKernelAdapter(AgentKernelPort):
             and available_tools is None
             else None
         )
+        self._raise_if_cancelled()
         response = await provider.chat(
             messages=messages,
             tools=available_tools,
@@ -301,6 +310,7 @@ class NanobotKernelAdapter(AgentKernelPort):
             tool_messages = []
             tool_outcomes = []
             for tool_call in tool_calls:
+                self._raise_if_cancelled()
                 outcome = self.tool_executor.execute_tool_call(
                     request=request,
                     tool_call=tool_call,
@@ -340,6 +350,7 @@ class NanobotKernelAdapter(AgentKernelPort):
             raw_payload_data["tool_outcomes"] = tool_outcomes
             if max_iterations > 1:
                 raw_payload_data["follow_up_messages"] = tool_messages
+                self._raise_if_cancelled()
                 follow_up = await provider.chat(
                     messages=[*messages, *tool_messages],
                     tools=None,
@@ -376,6 +387,13 @@ class NanobotKernelAdapter(AgentKernelPort):
             pending_approval_id=pending_approval_id,
             pending_tool_call_id=pending_tool_call_id,
         )
+
+    def _raise_if_cancelled(self) -> None:
+        if self.cancellation_probe is None:
+            return
+        if self.cancellation_probe():
+            msg = "Subagent execution was cancelled."
+            raise KernelExecutionCancelledError(msg)
 
     def _resolve_provider(self, request: KernelExecutionRequest):
         provider_name = resolve_provider_name(request.soul.model_provider)

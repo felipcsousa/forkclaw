@@ -53,29 +53,24 @@ class AgentExecutionRepository:
         statement = select(ToolCall).where(ToolCall.id == tool_call_id)
         return self.session.exec(statement).first()
 
-    def get_or_create_session(
+    def create_main_session(
         self,
+        *,
         agent_id: str,
-        session_id: str | None,
         title: str | None,
     ) -> SessionRecord:
-        if session_id:
-            existing = self.get_session(session_id)
-            if existing is not None:
-                return existing
-
-            msg = "Session not found."
-            raise ValueError(msg)
-
         record = SessionRecord(
             agent_id=agent_id,
+            kind="main",
             title=(title or "").strip() or "Agent Session",
             status="active",
+            root_session_id=None,
+            spawn_depth=0,
             started_at=utc_now(),
         )
+        record.root_session_id = record.id
         self.session.add(record)
-        self.session.commit()
-        self.session.refresh(record)
+        self.session.flush()
         return record
 
     def list_session_messages(self, session_id: str) -> list[Message]:
@@ -117,16 +112,14 @@ class AgentExecutionRepository:
             content_text=content,
         )
         self.session.add(message)
-        self.session.commit()
-        self.session.refresh(message)
+        self.session.flush()
         return message
 
     def touch_session(self, session_record: SessionRecord) -> None:
         session_record.last_message_at = utc_now()
         session_record.updated_at = utc_now()
         self.session.add(session_record)
-        self.session.commit()
-        self.session.refresh(session_record)
+        self.session.flush()
 
     def list_skill_documents(self, agent_id: str) -> list[Document]:
         statement = select(Document).where(
@@ -147,18 +140,25 @@ class AgentExecutionRepository:
         statement = select(Setting).where(Setting.status == "active")
         return list(self.session.exec(statement))
 
-    def create_task(self, agent_id: str, session_id: str, payload: dict[str, object]) -> Task:
+    def create_task(
+        self,
+        agent_id: str,
+        session_id: str,
+        payload: dict[str, object],
+        *,
+        title: str = "Agent simple execution",
+        kind: str = "agent_execution",
+    ) -> Task:
         task = Task(
             agent_id=agent_id,
             session_id=session_id,
-            title="Agent simple execution",
-            kind="agent_execution",
+            title=title,
+            kind=kind,
             status="running",
             payload_json=json.dumps(payload, ensure_ascii=False),
         )
         self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
+        self.session.flush()
         return task
 
     def create_task_run(self, task_id: str) -> TaskRun:
@@ -169,8 +169,7 @@ class AgentExecutionRepository:
             started_at=utc_now(),
         )
         self.session.add(run)
-        self.session.commit()
-        self.session.refresh(run)
+        self.session.flush()
         return run
 
     def complete_task_run(
@@ -196,8 +195,7 @@ class AgentExecutionRepository:
         task_run.estimated_cost_usd = estimated_cost_usd
         task_run.updated_at = utc_now()
         self.session.add(task_run)
-        self.session.commit()
-        self.session.refresh(task_run)
+        self.session.flush()
         return task_run
 
     def complete_task(self, task: Task, *, status: str) -> Task:
@@ -205,16 +203,14 @@ class AgentExecutionRepository:
         task.completed_at = utc_now()
         task.updated_at = utc_now()
         self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
+        self.session.flush()
         return task
 
     def update_task_status(self, task: Task, *, status: str) -> Task:
         task.status = status
         task.updated_at = utc_now()
         self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
+        self.session.flush()
         return task
 
     def update_task_run_status(
@@ -232,8 +228,7 @@ class AgentExecutionRepository:
         task_run.estimated_cost_usd = estimated_cost_usd
         task_run.updated_at = utc_now()
         self.session.add(task_run)
-        self.session.commit()
-        self.session.refresh(task_run)
+        self.session.flush()
         return task_run
 
     def record_audit_event(
@@ -258,6 +253,5 @@ class AgentExecutionRepository:
             payload_json=json.dumps(payload, ensure_ascii=False),
         )
         self.session.add(event)
-        self.session.commit()
-        self.session.refresh(event)
+        self.session.flush()
         return event

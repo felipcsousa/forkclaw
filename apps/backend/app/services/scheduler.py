@@ -9,27 +9,43 @@ from app.db.session import get_db_session
 from app.models.entities import utc_now
 from app.repositories.cron_jobs import CronJobRepository
 from app.services.cron_jobs import BackgroundTaskExecutor
+from app.services.runtime_monitor import RuntimeComponentProbe
 
 
 class LocalScheduler:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, probe: RuntimeComponentProbe | None = None):
         self.settings = settings
+        self.probe = probe
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._last_heartbeat_started_at = 0.0
 
     def start(self) -> None:
         if self._task is None:
+            if self.probe is not None:
+                self.probe.mark_starting()
             self._task = asyncio.create_task(self._run_forever())
 
     async def stop(self) -> None:
         self._stop_event.set()
         if self._task is not None:
             await self._task
+            self._task = None
+        if self.probe is not None:
+            self.probe.mark_stopped()
 
     async def _run_forever(self) -> None:
         while not self._stop_event.is_set():
-            await asyncio.to_thread(self.tick)
+            try:
+                if self.probe is not None:
+                    self.probe.mark_tick_started()
+                await asyncio.to_thread(self.tick)
+            except Exception as exc:
+                if self.probe is not None:
+                    self.probe.mark_tick_failed(exc)
+            else:
+                if self.probe is not None:
+                    self.probe.mark_tick_succeeded()
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(),

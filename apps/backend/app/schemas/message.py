@@ -27,3 +27,5 @@ class MessageRead(BaseModel):
 class SessionMessagesResponse(BaseModel):
     session: SessionRead
     items: list[MessageRead]
+    has_more: bool | None = None
+    next_before_sequence: int | None = None
