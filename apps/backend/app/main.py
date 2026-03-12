@@ -1,4 +1,6 @@
 import logging
+import secrets
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from time import perf_counter
 from uuid import uuid4
@@ -13,7 +15,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.seed import seed_default_data
 from app.db.session import get_db_session
-from app.services.scheduler import LocalScheduler
+from app.services.runtime_supervisor import RuntimeSupervisor
 
 
 def _request_id_from(request: Request) -> str:
@@ -25,21 +27,30 @@ def _request_id_from(request: Request) -> str:
 async def lifespan(app: FastAPI):
     with get_db_session() as session:
         seed_default_data(session)
-    scheduler = LocalScheduler(get_settings())
-    scheduler.start()
-    app.state.scheduler = scheduler
+    runtime_supervisor = getattr(app.state, "runtime_supervisor", None)
+    if runtime_supervisor is not None:
+        await runtime_supervisor.start()
     yield
-    await scheduler.stop()
+    if runtime_supervisor is not None:
+        await runtime_supervisor.stop()
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    shutdown_callback: Callable[[], None] | None = None,
+    runtime_supervisor: RuntimeSupervisor | None = None,
+) -> FastAPI:
     configure_logging()
     logger = logging.getLogger("nanobot.http")
+    settings = get_settings()
+    runtime_supervisor = runtime_supervisor or RuntimeSupervisor(settings)
     app = FastAPI(
         title="Nanobot Agent Backend",
         version="0.2.0",
         lifespan=lifespan,
     )
+    app.state.shutdown_callback = shutdown_callback
+    app.state.runtime_supervisor = runtime_supervisor
 
     app.add_middleware(
         CORSMiddleware,
@@ -59,6 +70,24 @@ def create_app() -> FastAPI:
         request_id = request.headers.get("x-request-id") or str(uuid4())
         request.state.request_id = request_id
         started_at = perf_counter()
+        if settings.bootstrap_token and request.method != "OPTIONS":
+            provided_token = request.headers.get("x-backend-bootstrap-token") or ""
+            if not secrets.compare_digest(provided_token, settings.bootstrap_token):
+                logger.warning(
+                    (
+                        "request.unauthorized request_id=%s method=%s path=%s "
+                        "reason=invalid_bootstrap_token"
+                    ),
+                    request_id,
+                    request.method,
+                    request.url.path,
+                )
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid bootstrap token.", "request_id": request_id},
+                    headers={"X-Request-ID": request_id},
+                )
+                return response
         response = await call_next(request)
         duration_ms = int((perf_counter() - started_at) * 1000)
         response.headers["X-Request-ID"] = request_id

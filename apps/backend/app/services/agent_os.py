@@ -36,12 +36,28 @@ class AgentOSService:
     def get_session(self, session_id: str) -> SessionRecord | None:
         return self.sessions.get_session(session_id)
 
-    def list_session_messages(self, session_id: str) -> tuple[SessionRecord | None, list[Message]]:
+    def list_session_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before_sequence: int | None = None,
+    ) -> tuple[SessionRecord | None, list[Message], bool | None, int | None]:
         record = self.sessions.get_session(session_id)
         if record is None:
-            return None, []
+            return None, [], None, None
 
-        return record, self.sessions.list_messages(session_id)
+        messages, has_more, next_before_sequence = self.sessions.list_messages(
+            session_id,
+            limit=limit,
+            before_sequence=before_sequence,
+        )
+        return (
+            record,
+            messages,
+            has_more if limit is not None else None,
+            next_before_sequence if limit is not None else None,
+        )
 
     def list_settings(self) -> list[Setting]:
         return self.settings.list_settings()

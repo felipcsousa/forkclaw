@@ -1,195 +1,23 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { type AppView } from '../components/app-shell-layout';
+import { getOperationalProviderLabel } from '../lib/backend/settings';
+import { useActivityController } from './controllers/useActivityController';
+import { useAgentProfileController } from './controllers/useAgentProfileController';
+import { useApprovalsController } from './controllers/useApprovalsController';
+import { useChatController } from './controllers/useChatController';
+import { useJobsController } from './controllers/useJobsController';
+import { useOperationalSettingsController } from './controllers/useOperationalSettingsController';
+import { useShellController } from './controllers/useShellController';
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from 'react';
-
-import { APP_VIEW_DETAILS, type AppView } from '../components/app-shell-layout';
-import {
-  approveApproval,
-  activateCronJob,
-  createCronJob,
-  createSession,
-  deleteCronJob,
-  denyApproval,
-  fetchActivityTimeline,
-  fetchApprovals,
-  fetchAgentConfig,
-  fetchCronJobsDashboard,
-  fetchOperationalSettings,
-  fetchSkills,
-  fetchToolCatalog,
-  fetchSessionMessages,
-  fetchSessions,
-  fetchToolCalls,
-  fetchToolPolicy,
-  fetchToolPermissions,
-  getOperationalProviderLabel,
-  pauseCronJob,
-  resetAgentConfig,
-  sendSessionMessage,
-  updateAgentConfig,
-  updateOperationalSettings,
-  updateSkill,
-  updateToolPolicy,
-  updateToolPermission,
-  type ActivityTimelineItemRecord,
-  type AgentConfigUpdate,
-  type AgentRecord,
-  type ApprovalRecord,
-  type CronJobCreateInput,
-  type CronJobRecord,
-  type HeartbeatStatusRecord,
-  type MessageRecord,
-  type OperationalSettingsRecord,
-  type OperationalSettingsUpdate,
-  type SessionRecord,
-  type SkillRecord,
-  type TaskRunHistoryRecord,
-  type ToolCatalogEntryRecord,
-  type ToolCallRecord,
-  type ToolPermissionLevel,
-  type ToolPermissionRecord,
-  type ToolPolicyProfileId,
-  type ToolPolicyRecord,
-} from '../lib/backend';
-
-const emptyAgentDraft: AgentConfigUpdate = {
-  name: '',
-  description: '',
-  identity_text: '',
-  soul_text: '',
-  user_context_text: '',
-  policy_base_text: '',
-  model_name: '',
-};
-
-const emptyOperationalDraft: OperationalSettingsUpdate = {
-  provider: 'product_echo',
-  model_name: 'product-echo/simple',
-  workspace_root: '',
-  max_iterations_per_execution: 2,
-  daily_budget_usd: 10,
-  monthly_budget_usd: 200,
-  default_view: 'chat',
-  activity_poll_seconds: 3,
-  heartbeat_interval_seconds: 1800,
-  api_key: '',
-  clear_api_key: false,
-};
-
-type PendingSetter = Dispatch<SetStateAction<boolean>>;
-
-interface AsyncActionOptions {
-  errorMessage: string;
-  setPending?: PendingSetter;
-  clearError?: boolean;
-}
-
-function toAgentDraft(agent: AgentRecord): AgentConfigUpdate {
-  return {
-    name: agent.name,
-    description: agent.description || '',
-    identity_text: agent.profile?.identity_text || '',
-    soul_text: agent.profile?.soul_text || '',
-    user_context_text: agent.profile?.user_context_text || '',
-    policy_base_text: agent.profile?.policy_base_text || '',
-    model_name: agent.profile?.model_name || '',
-  };
-}
-
-function toOperationalDraft(
-  settings: OperationalSettingsRecord,
-): OperationalSettingsUpdate {
-  return {
-    provider: settings.provider,
-    model_name: settings.model_name,
-    workspace_root: settings.workspace_root,
-    max_iterations_per_execution: settings.max_iterations_per_execution,
-    daily_budget_usd: settings.daily_budget_usd,
-    monthly_budget_usd: settings.monthly_budget_usd,
-    default_view: settings.default_view,
-    activity_poll_seconds: settings.activity_poll_seconds,
-    heartbeat_interval_seconds: settings.heartbeat_interval_seconds,
-    api_key: '',
-    clear_api_key: false,
-  };
-}
-
-function toErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
+  type AsyncActionOptions,
+  toErrorMessage,
+} from './controllers/shared';
+import { useToolingController } from './controllers/useToolingController';
 
 export function useAppController() {
-  const [view, setView] = useState<AppView>('chat');
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [activeSession, setActiveSession] = useState<SessionRecord | null>(
-    null,
-  );
-  const [messages, setMessages] = useState<MessageRecord[]>([]);
-  const [draft, setDraft] = useState('');
-  const [agent, setAgent] = useState<AgentRecord | null>(null);
-  const [agentDraft, setAgentDraft] =
-    useState<AgentConfigUpdate>(emptyAgentDraft);
-  const [operationalSettings, setOperationalSettings] =
-    useState<OperationalSettingsRecord | null>(null);
-  const [operationalDraft, setOperationalDraft] =
-    useState<OperationalSettingsUpdate>(emptyOperationalDraft);
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [isLoadingAgent, setIsLoadingAgent] = useState(false);
-  const [isSavingAgent, setIsSavingAgent] = useState(false);
-  const [isResettingAgent, setIsResettingAgent] = useState(false);
-  const [isLoadingOperationalSettings, setIsLoadingOperationalSettings] =
-    useState(false);
-  const [isSavingOperationalSettings, setIsSavingOperationalSettings] =
-    useState(false);
-  const [workspaceRoot, setWorkspaceRoot] = useState('');
-  const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntryRecord[]>([]);
-  const [toolPolicy, setToolPolicy] = useState<ToolPolicyRecord | null>(null);
-  const [toolPermissions, setToolPermissions] = useState<
-    ToolPermissionRecord[]
-  >([]);
-  const [toolCalls, setToolCalls] = useState<ToolCallRecord[]>([]);
-  const [skillsStrategy, setSkillsStrategy] = useState('all_eligible');
-  const [skills, setSkills] = useState<SkillRecord[]>([]);
-  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
-  const [cronJobs, setCronJobs] = useState<CronJobRecord[]>([]);
-  const [jobHistory, setJobHistory] = useState<TaskRunHistoryRecord[]>([]);
-  const [heartbeat, setHeartbeat] = useState<HeartbeatStatusRecord | null>(
-    null,
-  );
-  const [activityItems, setActivityItems] = useState<
-    ActivityTimelineItemRecord[]
-  >([]);
-  const [activeApprovalId, setActiveApprovalId] = useState<string | null>(null);
-  const [isLoadingTools, setIsLoadingTools] = useState(false);
-  const [isLoadingApprovals, setIsLoadingApprovals] = useState(false);
-  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
-  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
-  const [isUpdatingToolPermission, setIsUpdatingToolPermission] =
-    useState(false);
-  const [isActingOnApproval, setIsActingOnApproval] = useState(false);
-  const [isCreatingJob, setIsCreatingJob] = useState(false);
-  const [isMutatingJob, setIsMutatingJob] = useState(false);
-  const hasAppliedDefaultViewRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (
-      typeof window === 'undefined' ||
-      typeof window.matchMedia !== 'function'
-    ) {
-      return true;
-    }
-
-    return window.matchMedia('(min-width: 1024px)').matches;
-  });
+  const hasAppliedDefaultViewRef = useRef(false);
 
   const runAsyncAction = useCallback(
     async <T>(
@@ -213,247 +41,299 @@ export function useAppController() {
     [],
   );
 
-  const loadAgentConfig = useCallback(async () => {
-    const response = await runAsyncAction(() => fetchAgentConfig(), {
-      setPending: setIsLoadingAgent,
-      errorMessage: 'Failed to load agent profile.',
-    });
+  const chat = useChatController({ runAsyncAction, setErrorMessage });
+  const shell = useShellController({
+    onNavigateToChat: chat.clearActiveSessionState,
+  });
+  const activity = useActivityController({ runAsyncAction });
+  const agentProfile = useAgentProfileController({
+    runAsyncAction,
+    setErrorMessage,
+  });
+  const operationalSettings = useOperationalSettingsController({
+    runAsyncAction,
+    setErrorMessage,
+  });
+  const tooling = useToolingController({ runAsyncAction });
+  const approvals = useApprovalsController({ runAsyncAction });
+  const jobs = useJobsController({ runAsyncAction, setErrorMessage });
+  const { setMobileNavOpen, setView, view } = shell;
+  const {
+    activeSession,
+    activeSubagent,
+    activeSubagentParentSessionId,
+    bootstrap,
+    handleCancelSubagent: cancelSubagent,
+    handleCreateSession: createChatSession,
+    handleOpenSubagent: openSubagent,
+    handleReturnToParentSession: returnToParentSession,
+    handleSelectSession: selectSession,
+    handleSendMessage: sendMessage,
+    isSubagentSheetOpen,
+    loadSession,
+    loadSubagentDetail,
+    loadSubagentMessages,
+    refreshSessionContext,
+    refreshSessionsAndSelection,
+  } = chat;
+  const { loadActivity } = activity;
+  const { loadAgentConfig } = agentProfile;
+  const {
+    handleApproveApproval: approvePendingApproval,
+    handleDenyApproval: denyPendingApproval,
+    loadApprovals,
+  } = approvals;
+  const {
+    handleCreateJob: createJob,
+    handlePauseJob: pauseJob,
+    handleActivateJob: activateJob,
+    handleRemoveJob: removeJob,
+    loadJobs,
+  } = jobs;
+  const {
+    handleSaveOperationalSettings: saveOperationalSettings,
+    loadOperationalSettings,
+  } = operationalSettings;
+  const { loadToolingSnapshot, loadTools } = tooling;
+
+  const focusChatView = useCallback(() => {
+    setView('chat');
+    setMobileNavOpen(false);
+  }, [setMobileNavOpen, setView]);
+
+  const loadOperationalSettingsWithDefaultView = useCallback(async () => {
+    const response = await loadOperationalSettings();
     if (!response) {
-      return;
+      return null;
     }
 
-    setAgent(response);
-    setAgentDraft(toAgentDraft(response));
-  }, [runAsyncAction]);
-
-  const loadOperationalSettings = useCallback(async () => {
-    const response = await runAsyncAction(() => fetchOperationalSettings(), {
-      setPending: setIsLoadingOperationalSettings,
-      errorMessage: 'Failed to load operational settings.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setOperationalSettings(response);
-    setOperationalDraft(toOperationalDraft(response));
     setView((current) =>
       !hasAppliedDefaultViewRef.current && current === 'chat'
         ? response.default_view
         : current,
     );
     hasAppliedDefaultViewRef.current = true;
-  }, [runAsyncAction]);
-
-  const loadSession = useCallback(
-    async (session: SessionRecord) => {
-      const response = await runAsyncAction(
-        () => fetchSessionMessages(session.id),
-        {
-          setPending: setIsLoadingMessages,
-          errorMessage: 'Failed to load session messages.',
-        },
-      );
-      if (!response) {
-        return;
-      }
-
-      setActiveSession(response.session);
-      setMessages(response.items);
-    },
-    [runAsyncAction],
-  );
-
-  const loadTools = useCallback(async () => {
-    const response = await runAsyncAction(
-      async () => {
-        const [
-          catalogResponse,
-          policyResponse,
-          permissionsResponse,
-          callsResponse,
-          skillsResponse,
-        ] = await Promise.all([
-          fetchToolCatalog(),
-          fetchToolPolicy(),
-          fetchToolPermissions(),
-          fetchToolCalls(),
-          fetchSkills(),
-        ]);
-        return {
-          catalogResponse,
-          policyResponse,
-          permissionsResponse,
-          callsResponse,
-          skillsResponse,
-        };
-      },
-      {
-        setPending: setIsLoadingTools,
-        errorMessage: 'Failed to load tool permissions.',
-      },
-    );
-    if (!response) {
-      return;
-    }
-
-    setToolCatalog(response.catalogResponse.items);
-    setToolPolicy(response.policyResponse);
-    setWorkspaceRoot(response.permissionsResponse.workspace_root);
-    setToolPermissions(response.permissionsResponse.items);
-    setToolCalls(response.callsResponse.items);
-    setSkillsStrategy(response.skillsResponse.strategy);
-    setSkills(response.skillsResponse.items);
-  }, [runAsyncAction]);
-
-  const applyToolingSnapshot = useCallback(
-    (response: {
-      policyResponse: ToolPolicyRecord;
-      permissionsResponse: {
-        workspace_root: string;
-        items: ToolPermissionRecord[];
-      };
-      skillsResponse: {
-        strategy: string;
-        items: SkillRecord[];
-      };
-    }) => {
-      setToolPolicy(response.policyResponse);
-      setWorkspaceRoot(response.permissionsResponse.workspace_root);
-      setToolPermissions(response.permissionsResponse.items);
-      setSkillsStrategy(response.skillsResponse.strategy);
-      setSkills(response.skillsResponse.items);
-    },
-    [],
-  );
-
-  const loadApprovals = useCallback(async () => {
-    const response = await runAsyncAction(() => fetchApprovals(), {
-      setPending: setIsLoadingApprovals,
-      errorMessage: 'Failed to load approvals inbox.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setApprovals(response.items);
-    setActiveApprovalId((current) => {
-      if (response.items.length === 0) {
-        return null;
-      }
-
-      const stillExists = response.items.some((item) => item.id === current);
-      return stillExists ? current : response.items[0].id;
-    });
-  }, [runAsyncAction]);
-
-  const loadJobs = useCallback(async () => {
-    const response = await runAsyncAction(() => fetchCronJobsDashboard(), {
-      setPending: setIsLoadingJobs,
-      errorMessage: 'Failed to load scheduler state.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setCronJobs(response.items);
-    setJobHistory(response.history);
-    setHeartbeat(response.heartbeat);
-  }, [runAsyncAction]);
-
-  const loadActivity = useCallback(async () => {
-    const response = await runAsyncAction(() => fetchActivityTimeline(), {
-      setPending: setIsLoadingActivity,
-      errorMessage: 'Failed to load activity timeline.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setActivityItems(response.items);
-  }, [runAsyncAction]);
-
-  const bootstrap = useCallback(
-    async (preferredSessionId?: string) => {
-      const response = await runAsyncAction(() => fetchSessions(), {
-        setPending: setIsBootstrapping,
-        errorMessage: 'Failed to load chat sessions.',
-      });
-      if (!response) {
-        return;
-      }
-
-      setSessions(response.items);
-
-      const nextSession =
-        response.items.find((item) => item.id === preferredSessionId) ||
-        response.items[0] ||
-        null;
-
-      if (!nextSession) {
-        setActiveSession(null);
-        setMessages([]);
-        return;
-      }
-
-      await loadSession(nextSession);
-    },
-    [loadSession, runAsyncAction],
-  );
+    return response;
+  }, [loadOperationalSettings, setView]);
 
   const refreshJobsAndActivity = useCallback(async () => {
     await Promise.all([loadJobs(), loadActivity()]);
   }, [loadActivity, loadJobs]);
 
-  const refreshExecutionContext = useCallback(
-    async ({
-      preferredSessionId,
-      includeJobs = false,
-    }: {
-      preferredSessionId?: string;
-      includeJobs?: boolean;
-    } = {}) => {
-      await bootstrap(preferredSessionId);
-      await loadTools();
-      await loadApprovals();
-
-      if (includeJobs) {
-        await refreshJobsAndActivity();
-        return;
-      }
-
-      await loadActivity();
-    },
-    [bootstrap, loadActivity, loadApprovals, loadTools, refreshJobsAndActivity],
-  );
-
-  const adoptNewSession = useCallback((session: SessionRecord) => {
-    setSessions((current) => [session, ...current]);
-    setActiveSession(session);
-    setMessages([]);
-  }, []);
-
-  const ensureSessionForSend = useCallback(async () => {
-    if (activeSession) {
-      return activeSession;
-    }
-
-    const created = await runAsyncAction(() => createSession('New Session'), {
-      setPending: setIsCreatingSession,
-      errorMessage: 'Failed to create session.',
-    });
+  const handleCreateSession = useCallback(async () => {
+    const created = await createChatSession();
     if (!created) {
       return null;
     }
 
-    adoptNewSession(created);
+    focusChatView();
     return created;
-  }, [activeSession, adoptNewSession, runAsyncAction]);
+  }, [createChatSession, focusChatView]);
+
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      focusChatView();
+      return selectSession(sessionId);
+    },
+    [focusChatView, selectSession],
+  );
+
+  const handleOpenSubagent = useCallback(
+    async (parentSessionId: string, childSessionId: string) => {
+      focusChatView();
+      return openSubagent(parentSessionId, childSessionId);
+    },
+    [focusChatView, openSubagent],
+  );
+
+  const handleCancelSubagent = useCallback(
+    async (parentSessionId: string, childSessionId: string) =>
+      cancelSubagent(parentSessionId, childSessionId, async () => {
+        await loadActivity();
+      }),
+    [cancelSubagent, loadActivity],
+  );
+
+  const handleReturnToParentSession = useCallback(
+    async (parentSessionId: string) => {
+      focusChatView();
+      return returnToParentSession(parentSessionId);
+    },
+    [focusChatView, returnToParentSession],
+  );
+
+  const handleSendMessage = useCallback(
+    async () =>
+      sendMessage(async () => {
+        await Promise.all([loadApprovals(), loadActivity()]);
+      }),
+    [loadActivity, loadApprovals, sendMessage],
+  );
+
+  const handleSaveOperationalSettings = useCallback(async () => {
+    const saved = await saveOperationalSettings();
+    if (!saved) {
+      return null;
+    }
+
+    await loadToolingSnapshot();
+    return saved;
+  }, [loadToolingSnapshot, saveOperationalSettings]);
+
+  const handleApproveApproval = useCallback(
+    async (approvalId: string) => {
+      const response = await approvePendingApproval(approvalId);
+      if (!response) {
+        return null;
+      }
+
+      focusChatView();
+      const preferredSessionId = response.approval.session_id || undefined;
+      await Promise.all([
+        preferredSessionId
+          ? refreshSessionContext(preferredSessionId)
+          : refreshSessionsAndSelection(),
+        loadApprovals(),
+        loadActivity(),
+      ]);
+      return response;
+    },
+    [
+      approvePendingApproval,
+      focusChatView,
+      loadActivity,
+      loadApprovals,
+      refreshSessionContext,
+      refreshSessionsAndSelection,
+    ],
+  );
+
+  const handleDenyApproval = useCallback(
+    async (approvalId: string) => {
+      const response = await denyPendingApproval(approvalId);
+      if (!response) {
+        return null;
+      }
+
+      focusChatView();
+      const preferredSessionId = response.approval.session_id || undefined;
+      await Promise.all([
+        preferredSessionId
+          ? refreshSessionContext(preferredSessionId)
+          : refreshSessionsAndSelection(),
+        loadApprovals(),
+        loadActivity(),
+      ]);
+      return response;
+    },
+    [
+      denyPendingApproval,
+      focusChatView,
+      loadActivity,
+      loadApprovals,
+      refreshSessionContext,
+      refreshSessionsAndSelection,
+    ],
+  );
+
+  const handleCreateJob = useCallback(
+    async (payload: Parameters<typeof createJob>[0]) => {
+      const created = await createJob(payload);
+      if (!created) {
+        return null;
+      }
+
+      setView('jobs');
+      setMobileNavOpen(false);
+      await refreshJobsAndActivity();
+      return created;
+    },
+    [createJob, refreshJobsAndActivity, setMobileNavOpen, setView],
+  );
+
+  const handlePauseJob = useCallback(
+    async (jobId: string) => {
+      const paused = await pauseJob(jobId);
+      if (!paused) {
+        return null;
+      }
+
+      await refreshJobsAndActivity();
+      return paused;
+    },
+    [pauseJob, refreshJobsAndActivity],
+  );
+
+  const handleActivateJob = useCallback(
+    async (jobId: string) => {
+      const activated = await activateJob(jobId);
+      if (!activated) {
+        return null;
+      }
+
+      await refreshJobsAndActivity();
+      return activated;
+    },
+    [activateJob, refreshJobsAndActivity],
+  );
+
+  const handleRemoveJob = useCallback(
+    async (jobId: string) => {
+      const removed = await removeJob(jobId);
+      if (!removed) {
+        return null;
+      }
+
+      await refreshJobsAndActivity();
+      return removed;
+    },
+    [refreshJobsAndActivity, removeJob],
+  );
+
+  const handleRefreshCurrentView = useCallback(async () => {
+    setErrorMessage(null);
+
+    switch (view) {
+      case 'chat':
+        await bootstrap(activeSession?.id);
+        return;
+      case 'profile':
+        await loadAgentConfig();
+        return;
+      case 'settings':
+        await loadOperationalSettingsWithDefaultView();
+        return;
+      case 'tools':
+        await loadTools();
+        return;
+      case 'approvals':
+        await loadApprovals();
+        return;
+      case 'jobs':
+        await refreshJobsAndActivity();
+        return;
+      case 'activity':
+        await loadActivity();
+        return;
+      default:
+        return;
+    }
+  }, [
+    activeSession?.id,
+    bootstrap,
+    loadActivity,
+    loadAgentConfig,
+    loadApprovals,
+    loadOperationalSettingsWithDefaultView,
+    loadTools,
+    refreshJobsAndActivity,
+    view,
+  ]);
 
   useEffect(() => {
     void bootstrap();
     void loadAgentConfig();
-    void loadOperationalSettings();
+    void loadOperationalSettingsWithDefaultView();
     void loadTools();
     void loadApprovals();
     void loadJobs();
@@ -464,26 +344,9 @@ export function useAppController() {
     loadAgentConfig,
     loadApprovals,
     loadJobs,
-    loadOperationalSettings,
+    loadOperationalSettingsWithDefaultView,
     loadTools,
   ]);
-
-  useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      typeof window.matchMedia !== 'function'
-    ) {
-      return undefined;
-    }
-
-    const media = window.matchMedia('(min-width: 1024px)');
-    const sync = () => setIsDesktop(media.matches);
-
-    sync();
-    media.addEventListener('change', sync);
-
-    return () => media.removeEventListener('change', sync);
-  }, []);
 
   useEffect(() => {
     if (view !== 'jobs' && view !== 'activity') {
@@ -491,7 +354,8 @@ export function useAppController() {
     }
 
     const intervalMs = Math.max(
-      (operationalSettings?.activity_poll_seconds || 3) * 1000,
+      (operationalSettings.operationalSettings?.activity_poll_seconds || 3) *
+        1000,
       1000,
     );
     const intervalId = window.setInterval(() => {
@@ -500,492 +364,145 @@ export function useAppController() {
 
     return () => window.clearInterval(intervalId);
   }, [
-    operationalSettings?.activity_poll_seconds,
+    operationalSettings.operationalSettings?.activity_poll_seconds,
     refreshJobsAndActivity,
     view,
   ]);
 
-  async function handleCreateSession() {
-    const created = await runAsyncAction(() => createSession('New Session'), {
-      setPending: setIsCreatingSession,
-      errorMessage: 'Failed to create session.',
-    });
-    if (!created) {
-      return;
+  useEffect(() => {
+    if (view !== 'chat' || !activeSession) {
+      return undefined;
     }
 
-    adoptNewSession(created);
-    setDraft('');
-    setView('chat');
-    setMobileNavOpen(false);
-  }
-
-  async function handleSelectSession(sessionId: string) {
-    if (sessionId === activeSession?.id) {
-      setView('chat');
-      setMobileNavOpen(false);
-      return;
-    }
-
-    const session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-      return;
-    }
-
-    setView('chat');
-    setMobileNavOpen(false);
-    await loadSession(session);
-  }
-
-  async function handleSendMessage() {
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      setErrorMessage('Write a message before sending it to the agent.');
-      return;
-    }
-
-    const session = await ensureSessionForSend();
-    if (!session) {
-      return;
-    }
-
-    const sent = await runAsyncAction(
-      async () => {
-        setDraft('');
-        await sendSessionMessage(session.id, trimmed);
-        await refreshExecutionContext({
-          preferredSessionId: session.id,
-          includeJobs: true,
+    const intervalMs = Math.max(
+      (operationalSettings.operationalSettings?.activity_poll_seconds || 3) *
+        1000,
+      1000,
+    );
+    const intervalId = window.setInterval(() => {
+      void loadSession(activeSession, { silent: true });
+      if (isSubagentSheetOpen && activeSubagent && activeSubagentParentSessionId) {
+        void loadSubagentDetail(activeSubagentParentSessionId, activeSubagent.id, {
+          silent: true,
         });
-      },
-      {
-        setPending: setIsSending,
-        errorMessage: 'Failed to send message.',
-      },
-    );
+        void loadSubagentMessages(
+          activeSubagentParentSessionId,
+          activeSubagent.id,
+          { silent: true },
+        );
+      }
+    }, intervalMs);
 
-    if (sent === null) {
-      setDraft(trimmed);
-    }
-  }
+    return () => window.clearInterval(intervalId);
+  }, [
+    activeSession,
+    activeSubagent,
+    activeSubagentParentSessionId,
+    isSubagentSheetOpen,
+    loadSession,
+    loadSubagentDetail,
+    loadSubagentMessages,
+    operationalSettings.operationalSettings?.activity_poll_seconds,
+    view,
+  ]);
 
-  function handleAgentDraftChange(
-    field: keyof AgentConfigUpdate,
-    value: string,
-  ) {
-    setAgentDraft((current) => ({ ...current, [field]: value }));
-  }
-
-  function handleOperationalDraftChange<
-    K extends keyof OperationalSettingsUpdate,
-  >(field: K, value: OperationalSettingsUpdate[K]) {
-    setOperationalDraft((current) => ({ ...current, [field]: value }));
-  }
-
-  async function handleSaveAgentConfig() {
-    if (
-      !agentDraft.name.trim() ||
-      !agentDraft.identity_text.trim() ||
-      !agentDraft.soul_text.trim() ||
-      !agentDraft.policy_base_text.trim() ||
-      !agentDraft.model_name.trim()
-    ) {
-      setErrorMessage(
-        'Name, identity, soul, policy base, and default model are required.',
-      );
-      return;
-    }
-
-    const saved = await runAsyncAction(
-      () =>
-        updateAgentConfig({
-          name: agentDraft.name.trim(),
-          description: agentDraft.description.trim(),
-          identity_text: agentDraft.identity_text.trim(),
-          soul_text: agentDraft.soul_text.trim(),
-          user_context_text: agentDraft.user_context_text.trim(),
-          policy_base_text: agentDraft.policy_base_text.trim(),
-          model_name: agentDraft.model_name.trim(),
-        }),
-      {
-        setPending: setIsSavingAgent,
-        errorMessage: 'Failed to save agent profile.',
-      },
-    );
-    if (!saved) {
-      return;
-    }
-
-    setAgent(saved);
-    setAgentDraft(toAgentDraft(saved));
-  }
-
-  async function handleResetAgentConfig() {
-    const reset = await runAsyncAction(() => resetAgentConfig(), {
-      setPending: setIsResettingAgent,
-      errorMessage: 'Failed to restore agent defaults.',
-    });
-    if (!reset) {
-      return;
-    }
-
-    setAgent(reset);
-    setAgentDraft(toAgentDraft(reset));
-  }
-
-  async function handleSaveOperationalSettings() {
-    if (
-      !operationalDraft.model_name.trim() ||
-      !operationalDraft.workspace_root.trim()
-    ) {
-      setErrorMessage('Provider model and workspace root are required.');
-      return;
-    }
-
-    const saved = await runAsyncAction(
-      () =>
-        updateOperationalSettings({
-          ...operationalDraft,
-          model_name: operationalDraft.model_name.trim(),
-          workspace_root: operationalDraft.workspace_root.trim(),
-          api_key: operationalDraft.api_key?.trim() || null,
-        }),
-      {
-        setPending: setIsSavingOperationalSettings,
-        errorMessage: 'Failed to save operational settings.',
-      },
-    );
-    if (!saved) {
-      return;
-    }
-
-    setOperationalSettings(saved);
-    setOperationalDraft(toOperationalDraft(saved));
-    await Promise.all([loadAgentConfig(), loadTools()]);
-  }
-
-  async function handleChangeToolPermission(
-    toolName: string,
-    permissionLevel: ToolPermissionLevel,
-  ) {
-    const updated = await runAsyncAction(
-      async () => {
-        await updateToolPermission(toolName, permissionLevel);
-        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
-          fetchToolPolicy(),
-          fetchToolPermissions(),
-          fetchSkills(),
-        ]);
-        return { policyResponse, permissionsResponse, skillsResponse };
-      },
-      {
-        setPending: setIsUpdatingToolPermission,
-        errorMessage: 'Failed to update tool permission.',
-      },
-    );
-    if (!updated) {
-      return;
-    }
-
-    applyToolingSnapshot(updated);
-  }
-
-  async function handleChangeToolPolicyProfile(profileId: ToolPolicyProfileId) {
-    const updated = await runAsyncAction(
-      async () => {
-        await updateToolPolicy(profileId);
-        const [policyResponse, permissionsResponse, skillsResponse] = await Promise.all([
-          fetchToolPolicy(),
-          fetchToolPermissions(),
-          fetchSkills(),
-        ]);
-        return { policyResponse, permissionsResponse, skillsResponse };
-      },
-      {
-        setPending: setIsUpdatingToolPermission,
-        errorMessage: 'Failed to update tool policy profile.',
-      },
-    );
-    if (!updated) {
-      return;
-    }
-
-    applyToolingSnapshot(updated);
-  }
-
-  async function handleToggleSkill(skillKey: string, enabled: boolean) {
-    const updated = await runAsyncAction(
-      () => updateSkill(skillKey, { enabled }),
-      {
-        setPending: setIsUpdatingToolPermission,
-        errorMessage: 'Failed to update skill settings.',
-      },
-    );
-    if (!updated) {
-      return;
-    }
-
-    setSkills((current) =>
-      current.map((item) => (item.key === updated.key ? updated : item)),
-    );
-  }
-
-  async function handleApproveApproval(approvalId: string) {
-    const response = await runAsyncAction(() => approveApproval(approvalId), {
-      setPending: setIsActingOnApproval,
-      errorMessage: 'Failed to approve action.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setView('chat');
-    await refreshExecutionContext({
-      preferredSessionId: response.approval.session_id || undefined,
-    });
-  }
-
-  async function handleDenyApproval(approvalId: string) {
-    const response = await runAsyncAction(() => denyApproval(approvalId), {
-      setPending: setIsActingOnApproval,
-      errorMessage: 'Failed to deny action.',
-    });
-    if (!response) {
-      return;
-    }
-
-    setView('chat');
-    await refreshExecutionContext({
-      preferredSessionId: response.approval.session_id || undefined,
-    });
-  }
-
-  async function handleCreateJob(payload: CronJobCreateInput) {
-    if (!payload.name.trim() || !payload.schedule.trim()) {
-      setErrorMessage('Job name and schedule are required.');
-      return;
-    }
-
-    const created = await runAsyncAction(() => createCronJob(payload), {
-      setPending: setIsCreatingJob,
-      errorMessage: 'Failed to create scheduled job.',
-    });
-    if (!created) {
-      return;
-    }
-
-    setView('jobs');
-    await refreshJobsAndActivity();
-  }
-
-  async function handlePauseJob(jobId: string) {
-    const paused = await runAsyncAction(() => pauseCronJob(jobId), {
-      setPending: setIsMutatingJob,
-      errorMessage: 'Failed to pause scheduled job.',
-    });
-    if (!paused) {
-      return;
-    }
-
-    await refreshJobsAndActivity();
-  }
-
-  async function handleActivateJob(jobId: string) {
-    const activated = await runAsyncAction(() => activateCronJob(jobId), {
-      setPending: setIsMutatingJob,
-      errorMessage: 'Failed to activate scheduled job.',
-    });
-    if (!activated) {
-      return;
-    }
-
-    await refreshJobsAndActivity();
-  }
-
-  async function handleRemoveJob(jobId: string) {
-    const removed = await runAsyncAction(() => deleteCronJob(jobId), {
-      setPending: setIsMutatingJob,
-      errorMessage: 'Failed to remove scheduled job.',
-    });
-    if (removed === null) {
-      return;
-    }
-
-    await refreshJobsAndActivity();
-  }
-
-  async function handleRefreshCurrentView() {
-    setErrorMessage(null);
-
-    if (view === 'chat') {
-      await bootstrap(activeSession?.id);
-      return;
-    }
-
-    if (view === 'profile') {
-      await loadAgentConfig();
-      return;
-    }
-
-    if (view === 'settings') {
-      await loadOperationalSettings();
-      return;
-    }
-
-    if (view === 'tools') {
-      await loadTools();
-      return;
-    }
-
-    if (view === 'approvals') {
-      await loadApprovals();
-      return;
-    }
-
-    if (view === 'jobs') {
-      await refreshJobsAndActivity();
-      return;
-    }
-
-    await loadActivity();
-  }
-
-  const isComposerDisabled =
-    isBootstrapping || isLoadingMessages || isCreatingSession || isSending;
-  const isWorkspaceSyncing =
-    isBootstrapping ||
-    isLoadingAgent ||
-    isLoadingTools ||
-    isLoadingApprovals ||
-    isLoadingJobs ||
-    isLoadingActivity ||
-    isLoadingOperationalSettings;
-  const activeView = APP_VIEW_DETAILS[view];
-  const pendingApprovalsCount = approvals.filter(
+  const pendingApprovalsCount = approvals.approvals.filter(
     (approval) => approval.status === 'pending',
   ).length;
-  const activeJobsCount = cronJobs.filter(
+  const activeJobsCount = jobs.cronJobs.filter(
     (job) => job.status === 'active',
   ).length;
   const providerLabel = getOperationalProviderLabel(
-    operationalSettings?.provider || agent?.profile?.model_provider || 'product_echo',
+    operationalSettings.operationalSettings?.provider ||
+      agentProfile.agent?.profile?.model_provider ||
+      'product_echo',
   );
-  const agentTitle = agent?.name || 'Nanobot Agent';
+  const agentTitle = agentProfile.agent?.name || 'Nanobot Agent';
+  const isComposerDisabled =
+    chat.isBootstrapping ||
+    chat.isLoadingMessages ||
+    chat.isCreatingSession ||
+    chat.isSending;
+  const isWorkspaceSyncing =
+    chat.isBootstrapping ||
+    agentProfile.isLoadingAgent ||
+    tooling.isLoadingTools ||
+    approvals.isLoadingApprovals ||
+    jobs.isLoadingJobs ||
+    activity.isLoadingActivity ||
+    operationalSettings.isLoadingOperationalSettings;
 
   const getViewCount = useCallback(
     (targetView: AppView): string | null => {
-      if (targetView === 'chat') {
-        return sessions.length ? String(sessions.length) : null;
+      switch (targetView) {
+        case 'chat':
+          return chat.sessions.length ? String(chat.sessions.length) : null;
+        case 'approvals':
+          return pendingApprovalsCount ? String(pendingApprovalsCount) : null;
+        case 'tools':
+          return tooling.toolPermissions.length
+            ? String(tooling.toolPermissions.length)
+            : null;
+        case 'jobs':
+          return jobs.cronJobs.length ? String(jobs.cronJobs.length) : null;
+        case 'activity':
+          return activity.activityItems.length
+            ? String(activity.activityItems.length)
+            : null;
+        default:
+          return null;
       }
-
-      if (targetView === 'approvals') {
-        return pendingApprovalsCount ? String(pendingApprovalsCount) : null;
-      }
-
-      if (targetView === 'tools') {
-        return toolPermissions.length ? String(toolPermissions.length) : null;
-      }
-
-      if (targetView === 'jobs') {
-        return cronJobs.length ? String(cronJobs.length) : null;
-      }
-
-      if (targetView === 'activity') {
-        return activityItems.length ? String(activityItems.length) : null;
-      }
-
-      return null;
     },
     [
-      activityItems.length,
-      cronJobs.length,
+      activity.activityItems.length,
+      chat.sessions.length,
+      jobs.cronJobs.length,
       pendingApprovalsCount,
-      sessions.length,
-      toolPermissions.length,
+      tooling.toolPermissions.length,
     ],
   );
 
-  const navigateTo = useCallback((nextView: AppView) => {
-    if (nextView === 'chat') {
-      setActiveSession(null);
-    }
-    setView(nextView);
-    setMobileNavOpen(false);
-  }, []);
-
   return {
-    activeApprovalId,
-    activeJobsCount,
-    activeSession,
-    activeView,
-    activityItems,
-    agent,
-    agentDraft,
-    agentTitle,
-    approvals,
-    cronJobs,
-    draft,
-    errorMessage,
-    getViewCount,
-    handleActivateJob,
-    handleAgentDraftChange,
-    handleApproveApproval,
-    handleChangeToolPolicyProfile,
-    handleChangeToolPermission,
-    handleCreateJob,
-    handleCreateSession,
-    handleDenyApproval,
-    handleOperationalDraftChange,
-    handlePauseJob,
-    handleRefreshCurrentView,
-    handleRemoveJob,
-    handleResetAgentConfig,
-    handleSaveAgentConfig,
-    handleSaveOperationalSettings,
-    handleSelectSession,
-    handleSendMessage,
-    heartbeat,
-    isActingOnApproval,
-    isBootstrapping,
-    isComposerDisabled,
-    isCreatingJob,
-    isCreatingSession,
-    isDesktop,
-    isLoadingActivity,
-    isLoadingAgent,
-    isLoadingApprovals,
-    isLoadingJobs,
-    isLoadingMessages,
-    isLoadingOperationalSettings,
-    isLoadingTools,
-    isMutatingJob,
-    isResettingAgent,
-    isSavingAgent,
-    isSavingOperationalSettings,
-    isSending,
-    isUpdatingToolPermission,
-    isWorkspaceSyncing,
-    jobHistory,
-    messages,
-    mobileNavOpen,
-    navigateTo,
-    operationalDraft,
-    operationalSettings,
-    pendingApprovalsCount,
-    providerLabel,
-    sessions,
-    setActiveApprovalId,
-    setDraft,
-    setErrorMessage,
-    setMobileNavOpen,
-    skills,
-    skillsStrategy,
-    toolCalls,
-    toolCatalog,
-    toolPolicy,
-    toolPermissions,
-    handleToggleSkill,
-    view,
-    workspaceRoot,
+    activity,
+    agentProfile,
+    app: {
+      activeJobsCount,
+      agentTitle,
+      errorMessage,
+      getViewCount,
+      handleRefreshCurrentView,
+      isComposerDisabled,
+      isWorkspaceSyncing,
+      pendingApprovalsCount,
+      providerLabel,
+      setErrorMessage,
+    },
+    approvals: {
+      ...approvals,
+      handleApproveApproval,
+      handleDenyApproval,
+    },
+    chat: {
+      ...chat,
+      handleCancelSubagent,
+      handleCreateSession,
+      handleOpenSubagent,
+      handleReturnToParentSession,
+      handleSelectSession,
+      handleSendMessage,
+    },
+    jobs: {
+      ...jobs,
+      handleActivateJob,
+      handleCreateJob,
+      handlePauseJob,
+      handleRemoveJob,
+    },
+    operationalSettings: {
+      ...operationalSettings,
+      handleSaveOperationalSettings,
+    },
+    shell,
+    tooling,
   };
 }

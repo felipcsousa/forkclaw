@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { vi } from 'vitest';
 
 import App from './App';
@@ -15,6 +16,10 @@ const baseTimestamp = '2026-03-08T12:00:00Z';
 const mockFetchSessions = vi.fn();
 const mockCreateSession = vi.fn();
 const mockFetchSessionMessages = vi.fn();
+const mockFetchSessionSubagents = vi.fn();
+const mockFetchSessionSubagent = vi.fn();
+const mockFetchSessionSubagentMessages = vi.fn();
+const mockCancelSessionSubagent = vi.fn();
 const mockSendSessionMessage = vi.fn();
 const mockFetchAgentConfig = vi.fn();
 const mockUpdateAgentConfig = vi.fn();
@@ -62,9 +67,18 @@ function makeSession(overrides: Record<string, unknown> = {}) {
   return {
     id: 'session-1',
     agent_id: 'agent-1',
+    kind: 'main',
+    parent_session_id: null,
+    root_session_id: 'session-1',
+    spawn_depth: 0,
     title: 'Persistent Chat',
     summary: null,
     status: 'active',
+    delegated_goal: null,
+    delegated_context_snapshot: null,
+    tool_profile: null,
+    model_override: null,
+    max_iterations: null,
     started_at: baseTimestamp,
     last_message_at: null,
     created_at: baseTimestamp,
@@ -240,8 +254,127 @@ function makeApproval(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeSubagent(overrides: Record<string, unknown> = {}) {
+  return {
+    ...makeSession({
+      id: 'subagent-1',
+      kind: 'subagent',
+      parent_session_id: 'session-1',
+      root_session_id: 'session-1',
+      spawn_depth: 1,
+      title: 'Review the repo structure',
+      summary: 'Checked the repository structure and highlighted key files.',
+      status: 'running',
+      delegated_goal: 'Review the repo structure',
+      delegated_context_snapshot: 'Explicit context:\\nFocus on src/',
+      tool_profile: '["file"]',
+      model_override: 'product-echo/simple',
+      max_iterations: 3,
+    }),
+    run: {
+      id: 'subagent-run-1',
+      launcher_session_id: 'session-1',
+      child_session_id: 'subagent-1',
+      launcher_message_id: 'message-2',
+      launcher_task_run_id: null,
+      task_id: 'task-subagent-1',
+      task_run_id: 'run-subagent-1',
+      lifecycle_status: 'running',
+      started_at: '2026-03-08T12:02:00Z',
+      finished_at: null,
+      cancellation_requested_at: null,
+      final_summary: 'Checked the repository structure and highlighted key files.',
+      final_output_json: JSON.stringify({
+        status: 'running',
+        goal: 'Review the repo structure',
+        summary: 'Checked the repository structure and highlighted key files.',
+        key_findings: ['Main work lives under src/.'],
+        files_touched: ['src/App.tsx'],
+        tools_used: ['read_file'],
+        estimated_cost_usd: 0.0123,
+        started_at: '2026-03-08T12:02:00Z',
+        finished_at: null,
+      }),
+      estimated_cost_usd: 0.0123,
+      error_code: null,
+      error_summary: null,
+      created_at: '2026-03-08T12:02:00Z',
+      updated_at: '2026-03-08T12:02:05Z',
+    },
+    timeline_events: [
+      {
+        id: 'event-subagent-1',
+        event_type: 'subagent.started',
+        created_at: '2026-03-08T12:02:00Z',
+        status: 'running',
+        summary: 'Review the repo structure',
+        task_run_id: 'run-subagent-1',
+        estimated_cost_usd: 0.0123,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function makeActivityItem(overrides: Record<string, unknown> = {}) {
+  return {
+    task_run_id: 'run-activity-1',
+    task_id: 'task-activity-1',
+    task_kind: 'agent_execution',
+    task_title: 'Regular Activity',
+    session_id: 'session-1',
+    session_title: 'Persistent Chat',
+    started_at: baseTimestamp,
+    finished_at: baseTimestamp,
+    status: 'completed',
+    error_message: null,
+    duration_ms: 1200,
+    estimated_cost_usd: 0.0012,
+    skill_strategy: null,
+    resolved_skills: [],
+    lineage: null,
+    entries: [
+      {
+        id: 'entry-activity-1',
+        type: 'status',
+        created_at: baseTimestamp,
+        status: 'completed',
+        title: 'Execution status',
+        summary: 'Execution completed.',
+        error_message: null,
+        duration_ms: 1200,
+        estimated_cost_usd: 0.0012,
+        metadata: null,
+      },
+    ],
+    audit_log: [],
+    ...overrides,
+  };
+}
+
+interface MockSelectProps {
+  value?: string;
+  onValueChange: (value: string) => void;
+  children?: ReactNode;
+  disabled?: boolean;
+}
+
+interface MockSelectChildProps {
+  children?: ReactNode;
+}
+
+interface MockSelectItemProps {
+  value: string;
+  children?: ReactNode;
+}
+
 vi.mock('@/components/ui/select', () => ({
-  Select: ({ value, onValueChange, children, disabled }: any) => {
+  Select: ({
+    value,
+    onValueChange,
+    children,
+    disabled,
+  }: MockSelectProps) => {
     return (
       <select
         value={value}
@@ -254,9 +387,11 @@ vi.mock('@/components/ui/select', () => ({
       </select>
     );
   },
-  SelectTrigger: ({ id, 'aria-label': ariaLabel, children }: any) => null,
-  SelectContent: ({ children }: any) => <>{children}</>,
-  SelectItem: ({ value, children }: any) => <option value={value}>{children}</option>,
+  SelectTrigger: () => null,
+  SelectContent: ({ children }: MockSelectChildProps) => <>{children}</>,
+  SelectItem: ({ value, children }: MockSelectItemProps) => (
+    <option value={value}>{children}</option>
+  ),
   SelectValue: () => null,
 }));
 
@@ -264,6 +399,13 @@ vi.mock('./lib/backend', () => ({
   fetchSessions: () => mockFetchSessions(),
   createSession: (title?: string) => mockCreateSession(title),
   fetchSessionMessages: (sessionId: string) => mockFetchSessionMessages(sessionId),
+  fetchSessionSubagents: (sessionId: string) => mockFetchSessionSubagents(sessionId),
+  fetchSessionSubagent: (sessionId: string, childSessionId: string) =>
+    mockFetchSessionSubagent(sessionId, childSessionId),
+  fetchSessionSubagentMessages: (sessionId: string, childSessionId: string) =>
+    mockFetchSessionSubagentMessages(sessionId, childSessionId),
+  cancelSessionSubagent: (sessionId: string, childSessionId: string) =>
+    mockCancelSessionSubagent(sessionId, childSessionId),
   sendSessionMessage: (sessionId: string, content: string) =>
     mockSendSessionMessage(sessionId, content),
   fetchAgentConfig: () => mockFetchAgentConfig(),
@@ -297,6 +439,73 @@ vi.mock('./lib/backend', () => ({
       : provider === 'product_echo'
         ? 'product-echo/simple'
         : null,
+}));
+
+vi.mock('./lib/backend/activity', () => ({
+  fetchActivityTimeline: () => mockFetchActivityTimeline(),
+}));
+
+vi.mock('./lib/backend/agent', () => ({
+  fetchAgentConfig: () => mockFetchAgentConfig(),
+  resetAgentConfig: () => mockResetAgentConfig(),
+  updateAgentConfig: (payload: unknown) => mockUpdateAgentConfig(payload),
+}));
+
+vi.mock('./lib/backend/approvals', () => ({
+  approveApproval: (approvalId: string) => mockApproveApproval(approvalId),
+  denyApproval: (approvalId: string) => mockDenyApproval(approvalId),
+  fetchApprovals: () => mockFetchApprovals(),
+}));
+
+vi.mock('./lib/backend/jobs', () => ({
+  activateCronJob: (jobId: string) => mockActivateCronJob(jobId),
+  createCronJob: (payload: unknown) => mockCreateCronJob(payload),
+  deleteCronJob: (jobId: string) => mockDeleteCronJob(jobId),
+  fetchCronJobsDashboard: () => mockFetchCronJobsDashboard(),
+  pauseCronJob: (jobId: string) => mockPauseCronJob(jobId),
+}));
+
+vi.mock('./lib/backend/settings', () => ({
+  fetchOperationalSettings: () => mockFetchOperationalSettings(),
+  getOperationalProviderLabel: (provider: string) =>
+    providerLabelMap[provider] || provider,
+  getOperationalProviderSuggestedModel: (provider: string) =>
+    provider === 'kimi-coding'
+      ? 'k2p5'
+      : provider === 'product_echo'
+        ? 'product-echo/simple'
+        : null,
+  updateOperationalSettings: (payload: unknown) =>
+    mockUpdateOperationalSettings(payload),
+}));
+
+vi.mock('./lib/backend/sessions', () => ({
+  cancelSessionSubagent: (sessionId: string, childSessionId: string) =>
+    mockCancelSessionSubagent(sessionId, childSessionId),
+  createSession: (title?: string) => mockCreateSession(title),
+  fetchSessionMessages: (sessionId: string) => mockFetchSessionMessages(sessionId),
+  fetchSessions: () => mockFetchSessions(),
+  fetchSessionSubagent: (sessionId: string, childSessionId: string) =>
+    mockFetchSessionSubagent(sessionId, childSessionId),
+  fetchSessionSubagentMessages: (sessionId: string, childSessionId: string) =>
+    mockFetchSessionSubagentMessages(sessionId, childSessionId),
+  fetchSessionSubagents: (sessionId: string) =>
+    mockFetchSessionSubagents(sessionId),
+  sendSessionMessage: (sessionId: string, content: string) =>
+    mockSendSessionMessage(sessionId, content),
+}));
+
+vi.mock('./lib/backend/tools', () => ({
+  fetchSkills: () => mockFetchSkills(),
+  fetchToolCalls: () => mockFetchToolCalls(),
+  fetchToolCatalog: () => mockFetchToolCatalog(),
+  fetchToolPermissions: () => mockFetchToolPermissions(),
+  fetchToolPolicy: () => mockFetchToolPolicy(),
+  updateSkill: (skillKey: string, payload: unknown) =>
+    mockUpdateSkill(skillKey, payload),
+  updateToolPermission: (toolName: string, level: string) =>
+    mockUpdateToolPermission(toolName, level),
+  updateToolPolicy: (profileId: string) => mockUpdateToolPolicy(profileId),
 }));
 
 const agentConfig = {
@@ -368,6 +577,22 @@ describe('App', () => {
       heartbeat_interval_seconds: 1800,
       provider_api_key_configured: false,
     });
+    mockFetchSessionSubagents.mockResolvedValue({
+      parent_session_id: 'session-1',
+      items: [],
+    });
+    mockFetchSessionSubagent.mockResolvedValue(makeSubagent());
+    mockFetchSessionSubagentMessages.mockResolvedValue({
+      session: makeSubagent(),
+      items: [],
+    });
+    mockCancelSessionSubagent.mockResolvedValue({
+      parent_session_id: 'session-1',
+      child_session_id: 'subagent-1',
+      lifecycle_status: 'cancelled',
+      cancellation_requested_at: baseTimestamp,
+      finished_at: baseTimestamp,
+    });
     mockFetchActivityTimeline.mockResolvedValue({ items: [] });
     mockFetchCronJobsDashboard.mockResolvedValue({
       items: [],
@@ -432,6 +657,227 @@ describe('App', () => {
     await waitFor(() =>
       expect(screen.getByText('Reply: hello kernel')).toBeInTheDocument(),
     );
+  });
+
+  it('refreshes only session, approvals, and activity after sending a message', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:01:00Z',
+      updated_at: '2026-03-08T12:01:00Z',
+    });
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
+    mockSendSessionMessage.mockResolvedValueOnce({ status: 'completed' });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Persistent Chat' })).toBeInTheDocument(),
+    );
+
+    mockFetchSessions.mockClear();
+    mockFetchSessionMessages.mockClear();
+    mockFetchSessionSubagents.mockClear();
+    mockFetchApprovals.mockClear();
+    mockFetchActivityTimeline.mockClear();
+    mockFetchToolCatalog.mockClear();
+    mockFetchToolPolicy.mockClear();
+    mockFetchToolPermissions.mockClear();
+    mockFetchToolCalls.mockClear();
+    mockFetchSkills.mockClear();
+    mockFetchCronJobsDashboard.mockClear();
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValueOnce({
+      session,
+      items: [
+        makeMessage({
+          session_id: session.id,
+          created_at: '2026-03-08T12:02:00Z',
+          updated_at: '2026-03-08T12:02:00Z',
+        }),
+      ],
+    });
+    mockFetchSessionSubagents.mockResolvedValueOnce({
+      parent_session_id: session.id,
+      items: [],
+    });
+    mockFetchApprovals.mockResolvedValueOnce({ items: [] });
+    mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+
+    fireEvent.change(screen.getByLabelText(/message/i), {
+      target: { value: 'hello kernel' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(mockSendSessionMessage).toHaveBeenCalledWith('session-1', 'hello kernel'),
+    );
+    await waitFor(() => expect(mockFetchSessions).toHaveBeenCalledTimes(1));
+
+    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
+    expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
+    expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
+    expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
+    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
+    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
+    expect(mockFetchToolCalls).not.toHaveBeenCalled();
+    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
+  });
+
+  it('renders inline subagent cards, a child-session index, and opens the child session sheet', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:03:00Z',
+      updated_at: '2026-03-08T12:03:00Z',
+      subagent_counts: {
+        total: 1,
+        queued: 0,
+        running: 1,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        timed_out: 0,
+      },
+    });
+    const anchoredSubagent = makeSubagent({
+      parent_session_id: session.id,
+      root_session_id: session.id,
+    });
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValueOnce({
+      session,
+      items: [
+        makeMessage({
+          id: 'message-1',
+          session_id: session.id,
+          content_text: 'Can you review the repo?',
+        }),
+        makeMessage({
+          id: 'message-2',
+          session_id: session.id,
+          role: 'assistant',
+          sequence_number: 2,
+          content_text: 'I delegated a focused child session for this inspection.',
+          created_at: '2026-03-08T12:02:00Z',
+          updated_at: '2026-03-08T12:02:00Z',
+        }),
+      ],
+    });
+    mockFetchSessionSubagents.mockResolvedValueOnce({
+      parent_session_id: session.id,
+      items: [anchoredSubagent],
+    });
+    mockFetchSessionSubagent.mockResolvedValueOnce(anchoredSubagent);
+    mockFetchSessionSubagentMessages.mockResolvedValueOnce({
+      session: anchoredSubagent,
+      items: [
+        makeMessage({
+          id: 'child-message-1',
+          session_id: anchoredSubagent.id,
+          role: 'assistant',
+          content_text: 'I reviewed src/App.tsx and the desktop shell entrypoints.',
+        }),
+      ],
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByText('Subagentes')).toBeInTheDocument(),
+    );
+
+    expect(screen.getAllByText('Review the repo structure').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /abrir sessão filha/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /cancelar/i }).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /abrir sessão filha/i })[0]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('subagent-session-sheet')).toBeInTheDocument(),
+    );
+
+    expect(screen.getByText('Resumo final')).toBeInTheDocument();
+    expect(screen.getByText('Timeline resumida')).toBeInTheDocument();
+    expect(screen.getByText('Transcript da sessão filha')).toBeInTheDocument();
+    expect(screen.getByText('read_file')).toBeInTheDocument();
+    expect(
+      screen.getByText('I reviewed src/App.tsx and the desktop shell entrypoints.'),
+    ).toBeInTheDocument();
+  });
+
+  it('filters the activity timeline to subagents and keeps lineage visible', async () => {
+    const session = makeSession();
+    const normalItem = makeActivityItem({
+      task_title: 'Regular Activity',
+      session_title: 'Regular Activity Session',
+    });
+    const subagentItem = makeActivityItem({
+      task_run_id: 'run-subagent-1',
+      task_id: 'task-subagent-1',
+      task_kind: 'subagent_execution',
+      task_title: 'Child execution',
+      session_id: 'subagent-1',
+      session_title: 'Review the repo structure',
+      lineage: {
+        parent_session_id: session.id,
+        parent_session_title: session.title,
+        child_session_id: 'subagent-1',
+        child_session_title: 'Review the repo structure',
+        goal_summary: 'Review the repo structure',
+        status: 'completed',
+        task_run_id: 'run-subagent-1',
+        estimated_cost_usd: 0.0123,
+      },
+      entries: [
+        {
+          id: 'entry-subagent-1',
+          type: 'audit',
+          created_at: baseTimestamp,
+          status: 'info',
+          title: 'subagent.completed',
+          summary: 'Review the repo structure',
+          error_message: null,
+          duration_ms: null,
+          estimated_cost_usd: 0.0123,
+          metadata: null,
+        },
+      ],
+    });
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockFetchActivityTimeline.mockResolvedValueOnce({
+      items: [normalItem, subagentItem],
+    });
+    mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValueOnce({
+      parent_session_id: session.id,
+      items: [makeSubagent()],
+    });
+    mockFetchSessionSubagent.mockResolvedValueOnce(makeSubagent());
+    mockFetchSessionSubagentMessages.mockResolvedValueOnce({
+      session: makeSubagent(),
+      items: [],
+    });
+
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Subagents only' })).toBeInTheDocument(),
+    );
+
+    expect(screen.getByText('Regular Activity Session')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Subagents only' }));
+
+    expect(screen.queryByText('Regular Activity Session')).not.toBeInTheDocument();
+    expect(screen.getByText('Parent -> Child')).toBeInTheDocument();
+    expect(screen.getAllByText('Review the repo structure').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /open child session/i })).toBeInTheDocument();
   });
 
   it('creates a new session from the empty state', async () => {
@@ -943,6 +1389,92 @@ describe('App', () => {
     expect(screen.getByText(/Key configured/i)).toBeInTheDocument();
   });
 
+  it('refreshes only the tooling snapshot after saving operational settings', async () => {
+    mockFetchSessions.mockResolvedValueOnce({ items: [] });
+    mockUpdateOperationalSettings.mockResolvedValueOnce({
+      provider: 'openai',
+      model_name: 'gpt-4o-mini',
+      workspace_root: '/secure-workspace',
+      max_iterations_per_execution: 1,
+      daily_budget_usd: 0.5,
+      monthly_budget_usd: 10,
+      default_view: 'activity',
+      activity_poll_seconds: 5,
+      heartbeat_interval_seconds: 1800,
+      provider_api_key_configured: true,
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText(/^provider$/i, { selector: 'select' }),
+      ).toBeInTheDocument(),
+    );
+
+    mockFetchAgentConfig.mockClear();
+    mockFetchToolCatalog.mockClear();
+    mockFetchToolPolicy.mockClear();
+    mockFetchToolPermissions.mockClear();
+    mockFetchToolCalls.mockClear();
+    mockFetchSkills.mockClear();
+    mockFetchCronJobsDashboard.mockClear();
+    mockFetchActivityTimeline.mockClear();
+
+    mockFetchToolCatalog.mockResolvedValueOnce({
+      items: [makeToolCatalogEntry()],
+    });
+    mockFetchToolPolicy.mockResolvedValueOnce(makeToolPolicy());
+    mockFetchToolPermissions.mockResolvedValueOnce({
+      workspace_root: '/secure-workspace',
+      items: [makeToolPermission({ workspace_path: '/secure-workspace' })],
+    });
+    mockFetchSkills.mockResolvedValueOnce({
+      strategy: 'all_eligible',
+      items: [makeSkill()],
+    });
+
+    fireEvent.change(screen.getByLabelText(/^provider$/i, { selector: 'select' }), {
+      target: { value: 'openai' },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: 'gpt-4o-mini' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save settings/i }));
+
+    await waitFor(() =>
+      expect(mockUpdateOperationalSettings).toHaveBeenCalledWith({
+        provider: 'openai',
+        model_name: 'gpt-4o-mini',
+        workspace_root: '/workspace',
+        max_iterations_per_execution: 2,
+        daily_budget_usd: 10,
+        monthly_budget_usd: 200,
+        default_view: 'chat',
+        activity_poll_seconds: 3,
+        heartbeat_interval_seconds: 1800,
+        api_key: null,
+        clear_api_key: false,
+      }),
+    );
+
+    await waitFor(() => expect(mockFetchToolCatalog).toHaveBeenCalledTimes(1));
+
+    expect(mockFetchToolPolicy).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPermissions).toHaveBeenCalledTimes(1);
+    expect(mockFetchSkills).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCalls).not.toHaveBeenCalled();
+    expect(mockFetchAgentConfig).not.toHaveBeenCalled();
+    expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
+    expect(mockFetchActivityTimeline).not.toHaveBeenCalled();
+  });
+
   it('exposes Kimi for Coding in settings and preserves the rest of the draft', async () => {
     mockFetchSessions.mockResolvedValueOnce({ items: [] });
     mockUpdateOperationalSettings.mockResolvedValueOnce({
@@ -1071,6 +1603,158 @@ describe('App', () => {
     await waitFor(() =>
       expect(mockApproveApproval).toHaveBeenCalledWith('approval-1'),
     );
+  });
+
+  it('refreshes only approvals, activity, and the affected session after approving', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:01:00Z',
+      updated_at: '2026-03-08T12:01:00Z',
+    });
+    const approval = makeApproval({
+      session_id: session.id,
+      session_title: session.title,
+    });
+
+    mockFetchSessions.mockResolvedValue({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValue({
+      session,
+      items: [],
+    });
+    mockFetchApprovals.mockResolvedValue({ items: [approval] });
+    mockApproveApproval.mockResolvedValue({
+      approval: { ...approval, status: 'approved' },
+      task_run_status: 'completed',
+      tool_call_status: 'completed',
+      output_text: 'Tool result from write_file:\nWrote todo.txt',
+      assistant_message_id: 'message-3',
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-sidebar-nav-approvals')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-approvals'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Approve Action' })).toBeInTheDocument(),
+    );
+
+    mockFetchSessions.mockClear();
+    mockFetchSessionMessages.mockClear();
+    mockFetchSessionSubagents.mockClear();
+    mockFetchApprovals.mockClear();
+    mockFetchActivityTimeline.mockClear();
+    mockFetchToolCatalog.mockClear();
+    mockFetchToolPolicy.mockClear();
+    mockFetchToolPermissions.mockClear();
+    mockFetchToolCalls.mockClear();
+    mockFetchSkills.mockClear();
+    mockFetchCronJobsDashboard.mockClear();
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValueOnce({
+      parent_session_id: session.id,
+      items: [],
+    });
+    mockFetchApprovals.mockResolvedValueOnce({ items: [] });
+    mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve Action' }));
+
+    await waitFor(() =>
+      expect(mockApproveApproval).toHaveBeenCalledWith('approval-1'),
+    );
+    await waitFor(() => expect(mockFetchSessions).toHaveBeenCalledTimes(1));
+
+    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
+    expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
+    expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
+    expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
+    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
+    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
+    expect(mockFetchToolCalls).not.toHaveBeenCalled();
+    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
+  });
+
+  it('refreshes only approvals, activity, and the affected session after denying', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:01:00Z',
+      updated_at: '2026-03-08T12:01:00Z',
+    });
+    const approval = makeApproval({
+      session_id: session.id,
+      session_title: session.title,
+    });
+
+    mockFetchSessions.mockResolvedValue({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValue({
+      session,
+      items: [],
+    });
+    mockFetchApprovals.mockResolvedValue({ items: [approval] });
+    mockDenyApproval.mockResolvedValue({
+      approval: { ...approval, status: 'denied' },
+      task_run_status: 'failed',
+      tool_call_status: 'denied',
+      output_text: 'Tool request denied.',
+      assistant_message_id: 'message-3',
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-sidebar-nav-approvals')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-approvals'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument(),
+    );
+
+    mockFetchSessions.mockClear();
+    mockFetchSessionMessages.mockClear();
+    mockFetchSessionSubagents.mockClear();
+    mockFetchApprovals.mockClear();
+    mockFetchActivityTimeline.mockClear();
+    mockFetchToolCatalog.mockClear();
+    mockFetchToolPolicy.mockClear();
+    mockFetchToolPermissions.mockClear();
+    mockFetchToolCalls.mockClear();
+    mockFetchSkills.mockClear();
+    mockFetchCronJobsDashboard.mockClear();
+
+    mockFetchSessions.mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValueOnce({
+      parent_session_id: session.id,
+      items: [],
+    });
+    mockFetchApprovals.mockResolvedValueOnce({ items: [] });
+    mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+
+    await waitFor(() =>
+      expect(mockDenyApproval).toHaveBeenCalledWith('approval-1'),
+    );
+    await waitFor(() => expect(mockFetchSessions).toHaveBeenCalledTimes(1));
+
+    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
+    expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
+    expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
+    expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
+    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
+    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
+    expect(mockFetchToolCalls).not.toHaveBeenCalled();
+    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
   });
 
   it('creates a scheduled job from the jobs panel', async () => {

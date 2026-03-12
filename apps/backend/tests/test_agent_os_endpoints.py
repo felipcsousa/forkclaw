@@ -3,15 +3,23 @@ from __future__ import annotations
 import json
 import platform
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
+from alembic.config import Config
 from fastapi.testclient import TestClient
+from nanobot.providers.base import LLMResponse, ToolCallRequest
+from sqlalchemy import event, text
 from sqlmodel import select
 
+from alembic import command
 from app.core.agent_profile_defaults import LEGACY_AGENT_PROFILE
+from app.core.config import clear_settings_cache, get_settings
+from app.core.secrets import clear_secret_store_cache
 from app.db.seed import seed_default_data
-from app.db.session import get_db_session
+from app.db.session import clear_engine_cache, get_db_session
+from app.main import create_app
 from app.models.entities import (
     Agent,
     AgentProfile,
@@ -26,6 +34,74 @@ from app.models.entities import (
     ToolPermission,
     utc_now,
 )
+from app.services.runtime_supervisor import RuntimeSupervisor
+
+
+def _alembic_config() -> Config:
+    settings = get_settings()
+    config = Config(str(settings.backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(settings.backend_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    return config
+
+
+@contextmanager
+def _token_protected_client(
+    *,
+    tmp_path: Path,
+    monkeypatch,
+    bootstrap_token: str,
+    shutdown_callback=None,
+    runtime_supervisor=None,
+    use_default_runtime_supervisor: bool = False,
+):
+    database_path = tmp_path / "agent_os_test.db"
+    workspace_root = tmp_path / "workspace"
+    bundled_skills_root = tmp_path / "bundled-skills"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    bundled_skills_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "notes.txt").write_text("hello workspace", encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_WORKSPACE_ROOT", str(workspace_root))
+    monkeypatch.setenv("APP_BUNDLED_SKILLS_ROOT", str(bundled_skills_root))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("SCHEDULER_POLL_INTERVAL_SECONDS", "0.2")
+    monkeypatch.setenv("SUBAGENT_WORKER_POLL_INTERVAL_SECONDS", "0.1")
+    monkeypatch.setenv("SUBAGENT_RUN_TIMEOUT_SECONDS", "1.0")
+    monkeypatch.setenv("SUBAGENT_MAX_RUN_TIMEOUT_SECONDS", "2.0")
+    monkeypatch.setenv("SUBAGENT_STUCK_GRACE_SECONDS", "0.1")
+    monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
+    monkeypatch.setenv("STALE_TASK_RUN_SECONDS", "1")
+    monkeypatch.setenv("APP_SECRET_BACKEND", "memory")
+    monkeypatch.setenv("APP_BOOTSTRAP_TOKEN", bootstrap_token)
+
+    clear_settings_cache()
+    clear_secret_store_cache()
+    clear_engine_cache()
+
+    command.upgrade(_alembic_config(), "head")
+    with get_db_session() as session:
+        seed_default_data(session)
+
+    try:
+        app = (
+            create_app(shutdown_callback=shutdown_callback)
+            if use_default_runtime_supervisor
+            else create_app(
+                shutdown_callback=shutdown_callback,
+                runtime_supervisor=runtime_supervisor
+                or RuntimeSupervisor(get_settings()),
+            )
+        )
+        with TestClient(
+            app
+        ) as client:
+            yield client
+    finally:
+        clear_engine_cache()
+        clear_settings_cache()
+        clear_secret_store_cache()
 
 
 def _create_pending_write_file_approval(test_client: TestClient) -> tuple[dict, ToolCall, Approval]:
@@ -111,6 +187,167 @@ def test_health_check_returns_ok_payload(test_client: TestClient) -> None:
         "service": "backend",
         "version": "0.1.0",
     }
+
+
+def test_bootstrap_token_is_required_when_configured(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+    ) as client:
+        health_without_token = client.get("/health")
+        assert health_without_token.status_code == 401
+        assert health_without_token.json()["detail"] == "Invalid bootstrap token."
+
+        health_with_wrong_token = client.get(
+            "/health",
+            headers={"X-Backend-Bootstrap-Token": "wrong"},
+        )
+        assert health_with_wrong_token.status_code == 401
+
+        health_with_token = client.get(
+            "/health",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+        assert health_with_token.status_code == 200
+
+        sessions_without_token = client.get("/sessions")
+        assert sessions_without_token.status_code == 401
+
+        sessions_with_token = client.get(
+            "/sessions",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+        assert sessions_with_token.status_code == 200
+
+
+def test_internal_shutdown_endpoint_invokes_shutdown_callback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = {"count": 0}
+
+    def shutdown_callback() -> None:
+        calls["count"] += 1
+
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        shutdown_callback=shutdown_callback,
+    ) as client:
+        response = client.post(
+            "/internal/shutdown",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "accepted"}
+    assert calls["count"] == 1
+
+
+class _HealthyRuntimeComponent:
+    def __init__(self, _settings, *, probe):
+        self.probe = probe
+
+    def start(self) -> None:
+        self.probe.mark_starting()
+        self.probe.mark_tick_started()
+        self.probe.mark_tick_succeeded()
+
+    async def stop(self) -> None:
+        self.probe.mark_stopped()
+
+
+class _FailingRuntimeComponent:
+    def __init__(self, _settings, *, probe):
+        self.probe = probe
+
+    def start(self) -> None:
+        raise RuntimeError("runtime component failed to start")
+
+    async def stop(self) -> None:
+        self.probe.mark_stopped()
+
+
+def test_operational_health_returns_ok_when_components_are_running(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    supervisor = RuntimeSupervisor(
+        get_settings(),
+        scheduler_factory=_HealthyRuntimeComponent,
+        subagent_worker_factory=_HealthyRuntimeComponent,
+    )
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        runtime_supervisor=supervisor,
+    ) as client:
+        response = client.get(
+            "/health/operational",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["components"]["scheduler"]["status"] == "running"
+    assert payload["components"]["subagent_worker"]["status"] == "running"
+    assert payload["backlog"]["queued_subagents"] >= 0
+
+
+def test_operational_health_returns_degraded_when_runtime_component_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    supervisor = RuntimeSupervisor(
+        get_settings(),
+        scheduler_factory=_FailingRuntimeComponent,
+        subagent_worker_factory=_HealthyRuntimeComponent,
+    )
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        runtime_supervisor=supervisor,
+    ) as client:
+        response = client.get(
+            "/health/operational",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["components"]["scheduler"]["status"] == "degraded"
+    assert "failed to start" in payload["components"]["scheduler"]["last_error_summary"]
+    assert payload["components"]["subagent_worker"]["status"] == "running"
+
+
+def test_create_app_uses_default_runtime_supervisor_when_not_injected(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        use_default_runtime_supervisor=True,
+    ) as client:
+        response = client.get(
+            "/health/operational",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["components"]["scheduler"]["status"] != "stopped"
+    assert payload["components"]["subagent_worker"]["status"] != "stopped"
 
 
 def test_get_agent_returns_seeded_default_agent(test_client: TestClient) -> None:
@@ -615,6 +852,43 @@ def test_session_message_routes_round_trip_through_kernel(
     assert "Reply: hello chat" in payload["items"][1]["content_text"]
 
 
+def test_session_messages_support_optional_pagination(
+    test_client: TestClient,
+) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Paged Chat"})
+    assert create_session_response.status_code == 201
+    session_id = create_session_response.json()["id"]
+
+    for content in ["one", "two", "three"]:
+        response = test_client.post(
+            f"/sessions/{session_id}/messages",
+            json={"content": content},
+        )
+        assert response.status_code == 201
+
+    page_one = test_client.get(f"/sessions/{session_id}/messages?limit=2")
+    assert page_one.status_code == 200
+    first_payload = page_one.json()
+    assert [item["sequence_number"] for item in first_payload["items"]] == [5, 6]
+    assert first_payload["items"][0]["content_text"] == "three"
+    assert first_payload["items"][1]["content_text"].endswith("Reply: three")
+    assert first_payload["has_more"] is True
+    assert first_payload["next_before_sequence"] == first_payload["items"][0]["sequence_number"]
+
+    page_two = test_client.get(
+        f"/sessions/{session_id}/messages",
+        params={"limit": 2, "before_sequence": first_payload["next_before_sequence"]},
+    )
+    assert page_two.status_code == 200
+    second_payload = page_two.json()
+    assert [item["sequence_number"] for item in second_payload["items"]] == [3, 4]
+    assert second_payload["has_more"] is True
+
+    full_payload = test_client.get(f"/sessions/{session_id}/messages").json()
+    assert "has_more" not in full_payload
+    assert "next_before_sequence" not in full_payload
+
+
 def test_agent_config_can_be_updated_and_reset(test_client: TestClient) -> None:
     update_response = test_client.put(
         "/agent/config",
@@ -1058,6 +1332,8 @@ def test_activity_timeline_aggregates_execution_in_product_order(
     assert entry_types[-1] in {"status", "audit"}
     assert any(entry["title"] == "Execution status" for entry in item["entries"])
     assert any("list_files" in entry["title"] for entry in item["entries"])
+    tool_entry = next(entry for entry in item["entries"] if entry["type"] == "tool_call")
+    assert tool_entry["metadata"] == {"tool_name": "list_files"}
 
 
 def test_activity_timeline_surfaces_failures_clearly(test_client: TestClient) -> None:
@@ -1086,6 +1362,63 @@ def test_activity_timeline_surfaces_failures_clearly(test_client: TestClient) ->
     tool_entry = next(entry for entry in item["entries"] if entry["type"] == "tool_call")
     assert tool_entry["status"] == "denied"
     assert "denied by policy" in tool_entry["summary"]
+
+
+def test_activity_timeline_supports_optional_cursor_pagination(
+    test_client: TestClient,
+) -> None:
+    for index in range(3):
+        response = test_client.post(
+            "/agent/execute",
+            json={"title": f"Cursor Session {index}", "message": f"hello {index}"},
+        )
+        assert response.status_code == 201
+
+    first_page = test_client.get("/activity/timeline?limit=2")
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert len(first_payload["items"]) == 2
+    assert first_payload["next_cursor"] is not None
+
+    second_page = test_client.get(
+        "/activity/timeline",
+        params={"limit": 2, "cursor": first_payload["next_cursor"]},
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert len(second_payload["items"]) >= 1
+    assert {
+        item["task_run_id"] for item in first_payload["items"]
+    }.isdisjoint({item["task_run_id"] for item in second_payload["items"]})
+
+
+def test_activity_timeline_query_budget_is_batched(
+    test_client: TestClient,
+) -> None:
+    for index in range(5):
+        response = test_client.post(
+            "/agent/execute",
+            json={"title": f"Budget Session {index}", "message": "tool:list_files path=."},
+        )
+        assert response.status_code == 201
+
+    statements: list[str] = []
+
+    def before_cursor_execute(_conn, _cursor, statement, _params, _context, _executemany):
+        statements.append(statement)
+
+    from app.db.session import get_engine
+
+    engine = get_engine()
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        response = test_client.get("/activity/timeline?limit=5")
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 5
+    assert len(statements) <= 10
 
 
 def test_cron_job_can_be_created_and_runs_automatically(test_client: TestClient) -> None:
@@ -1217,3 +1550,390 @@ def test_heartbeat_records_activity_and_cleans_stale_runs(test_client: TestClien
 
     assert refreshed_run.status == "failed"
     assert refreshed_run.error_message == "Marked as failed by heartbeat after stale timeout."
+
+
+def test_subagent_spawn_persists_child_session_and_lifecycle(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.subagents.SubagentDelegationService.process_next_queued_run",
+        lambda self: False,
+    )
+    parent_response = test_client.post("/sessions", json={"title": "Parent Session"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Audit the workspace for stale files",
+            "context": "Focus on build artifacts only.",
+            "toolsets": ["group:fs", "group:web"],
+            "model": "product-echo/simple",
+            "max_iterations": 20,
+        },
+    )
+
+    assert spawn_response.status_code == 201
+    payload = spawn_response.json()
+    child_id = payload["child_session_id"]
+
+    assert payload == {
+        "parent_session_id": parent_id,
+        "child_session_id": child_id,
+        "status": "accepted",
+        "spawn_depth": 1,
+        "toolsets": ["file", "web"],
+        "model": "product-echo/simple",
+        "max_iterations": 20,
+        "timeout_seconds": 1.0,
+    }
+
+    with get_db_session() as session:
+        child_row = session.connection().execute(
+            text(
+                """
+                SELECT kind, parent_session_id, root_session_id, spawn_depth,
+                       delegated_goal, delegated_context_snapshot, tool_profile,
+                       model_override, max_iterations, timeout_seconds
+                FROM sessions
+                WHERE id = :child_id
+                """
+            ),
+            {"child_id": child_id},
+        ).mappings().one()
+        run_row = session.connection().execute(
+            text(
+                """
+                SELECT launcher_session_id, child_session_id, launcher_message_id,
+                       launcher_task_run_id, parent_summary_message_id,
+                       lifecycle_status, cancellation_requested_at, final_summary, final_output_json
+                FROM session_subagent_runs
+                WHERE child_session_id = :child_id
+                """
+            ),
+            {"child_id": child_id},
+        ).mappings().one()
+
+    assert child_row["kind"] == "subagent"
+    assert child_row["parent_session_id"] == parent_id
+    assert child_row["root_session_id"] == parent_id
+    assert child_row["spawn_depth"] == 1
+    assert child_row["delegated_goal"] == "Audit the workspace for stale files"
+    assert "Focus on build artifacts only." in child_row["delegated_context_snapshot"]
+    assert "Parent snapshot:" in child_row["delegated_context_snapshot"]
+    assert json.loads(child_row["tool_profile"]) == ["file", "web"]
+    assert child_row["model_override"] == "product-echo/simple"
+    assert child_row["max_iterations"] == 20
+    assert child_row["timeout_seconds"] == 1.0
+    assert run_row["launcher_session_id"] == parent_id
+    assert run_row["child_session_id"] == child_id
+    assert run_row["launcher_message_id"] is None
+    assert run_row["launcher_task_run_id"] is None
+    assert run_row["parent_summary_message_id"] is None
+    assert run_row["lifecycle_status"] == "queued"
+    assert run_row["cancellation_requested_at"] is None
+    assert run_row["final_summary"] is None
+    assert run_row["final_output_json"] is None
+
+    list_response = test_client.get(f"/sessions/{parent_id}/subagents")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert len(list_payload["items"]) == 1
+    assert list_payload["items"][0]["id"] == child_id
+    assert list_payload["items"][0]["kind"] == "subagent"
+    assert list_payload["items"][0]["timeout_seconds"] == 1.0
+    assert list_payload["items"][0]["run"]["lifecycle_status"] == "queued"
+
+    detail_response = test_client.get(f"/sessions/{parent_id}/subagents/{child_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["id"] == child_id
+    assert detail_payload["delegated_goal"] == "Audit the workspace for stale files"
+    assert detail_payload["timeout_seconds"] == 1.0
+    assert detail_payload["run"]["lifecycle_status"] == "queued"
+    assert len(detail_payload["timeline_events"]) == 1
+    assert detail_payload["timeline_events"][0]["event_type"] == "subagent.spawned"
+    assert detail_payload["timeline_events"][0]["status"] == "queued"
+    assert "task_run_id" not in detail_payload["timeline_events"][0]
+    assert "estimated_cost_usd" not in detail_payload["timeline_events"][0]
+
+
+def test_sessions_listing_stays_main_only_and_can_include_subagent_counts(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.subagents.SubagentDelegationService.process_next_queued_run",
+        lambda self: False,
+    )
+    parent_response = test_client.post("/sessions", json={"title": "Visible Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Inspect files", "toolsets": ["group:fs"]},
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    sessions_response = test_client.get("/sessions")
+    assert sessions_response.status_code == 200
+    items = sessions_response.json()["items"]
+    assert [item["id"] for item in items] == [parent_id]
+    assert "subagent_counts" not in items[0]
+
+    counted_response = test_client.get("/sessions?include_subagent_counts=true")
+    assert counted_response.status_code == 200
+    counted_item = counted_response.json()["items"][0]
+    assert counted_item["id"] == parent_id
+    assert counted_item["subagent_counts"] == {
+        "total": 1,
+        "queued": 1,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "cancelled": 0,
+        "timed_out": 0,
+    }
+
+    hidden_response = test_client.get(f"/sessions/{child_id}")
+    assert hidden_response.status_code == 404
+
+
+def test_subagent_cancel_is_idempotent_and_child_cannot_receive_user_messages(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.subagents.SubagentDelegationService.process_next_queued_run",
+        lambda self: False,
+    )
+    parent_response = test_client.post("/sessions", json={"title": "Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Summarize docs", "toolsets": ["group:fs"]},
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    first_cancel = test_client.post(f"/sessions/{parent_id}/subagents/{child_id}/cancel")
+    assert first_cancel.status_code == 200
+    assert first_cancel.json()["lifecycle_status"] == "cancelled"
+
+    second_cancel = test_client.post(f"/sessions/{parent_id}/subagents/{child_id}/cancel")
+    assert second_cancel.status_code == 200
+    assert second_cancel.json()["lifecycle_status"] == "cancelled"
+
+    message_response = test_client.post(
+        f"/sessions/{child_id}/messages",
+        json={"content": "hello child"},
+    )
+    assert message_response.status_code == 400
+    assert "subagent" in message_response.json()["detail"].lower()
+
+
+def test_subagent_spawn_validates_parent_kind_toolsets_and_concurrency(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.subagents.SubagentDelegationService.process_next_queued_run",
+        lambda self: False,
+    )
+    missing_parent = test_client.post(
+        "/sessions/missing/subagents",
+        json={"goal": "Do work", "toolsets": ["group:fs"]},
+    )
+    assert missing_parent.status_code == 404
+
+    parent_response = test_client.post("/sessions", json={"title": "Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    invalid_toolset = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Do work", "toolsets": ["unknown-group"]},
+    )
+    assert invalid_toolset.status_code == 400
+
+    child_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Child", "toolsets": ["group:fs"]},
+    )
+    assert child_response.status_code == 201
+    child_id = child_response.json()["child_session_id"]
+
+    nested_spawn = test_client.post(
+        f"/sessions/{child_id}/subagents",
+        json={"goal": "Nested", "toolsets": ["group:fs"]},
+    )
+    assert nested_spawn.status_code == 400
+
+    second_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Second", "toolsets": ["group:fs"]},
+    )
+    third_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Third", "toolsets": ["group:fs"]},
+    )
+    assert second_response.status_code == 201
+    assert third_response.status_code == 201
+
+    fourth_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Fourth", "toolsets": ["group:fs"]},
+    )
+    assert fourth_response.status_code == 400
+    assert "concurrency" in fourth_response.json()["detail"].lower()
+
+
+def test_subagent_with_empty_effective_scope_does_not_inherit_parent_tools(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    async def _request_list_files(self, messages, tools=None, model=None, **kwargs):
+        del self, messages, tools, model, kwargs
+        return LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call-list-files",
+                    name="list_files",
+                    arguments={"path": "."},
+                )
+            ],
+            finish_reason="tool_calls",
+            usage={},
+        )
+
+    monkeypatch.setattr(
+        "app.adapters.kernel.nanobot.ProductEchoLLMProvider.chat",
+        _request_list_files,
+    )
+
+    parent_response = test_client.post("/sessions", json={"title": "Scope Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Attempt a terminal tool outside delegated scope.",
+            "toolsets": ["group:runtime"],
+            "model": "product-echo/simple",
+        },
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    detail_payload = _wait_for(
+        lambda: (
+            lambda payload: payload
+            if payload["run"]["lifecycle_status"] in {"failed", "completed"}
+            else None
+        )(test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()),
+        timeout=3.0,
+        interval=0.1,
+    )
+
+    assert detail_payload["run"]["lifecycle_status"] == "completed"
+
+    with get_db_session() as session:
+        tool_call = session.exec(
+            select(ToolCall)
+            .where(ToolCall.session_id == child_id)
+            .order_by(ToolCall.created_at.desc())
+        ).first()
+
+    assert tool_call is not None
+    assert tool_call.tool_name == "list_files"
+    assert tool_call.status == "denied"
+    assert tool_call.output_json is not None
+    assert "outside the delegated scope" in tool_call.output_json
+
+
+def test_subagent_detail_and_cancel_require_matching_parent_session(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.subagents.SubagentDelegationService.process_next_queued_run",
+        lambda self: False,
+    )
+    first_parent = test_client.post("/sessions", json={"title": "First"})
+    second_parent = test_client.post("/sessions", json={"title": "Second"})
+    assert first_parent.status_code == 201
+    assert second_parent.status_code == 201
+
+    first_parent_id = first_parent.json()["id"]
+    second_parent_id = second_parent.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{first_parent_id}/subagents",
+        json={"goal": "Check scope", "toolsets": ["group:fs"]},
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    wrong_detail = test_client.get(f"/sessions/{second_parent_id}/subagents/{child_id}")
+    assert wrong_detail.status_code == 404
+
+    wrong_cancel = test_client.post(f"/sessions/{second_parent_id}/subagents/{child_id}/cancel")
+    assert wrong_cancel.status_code == 404
+
+
+def test_activity_timeline_includes_sanitized_subagent_lineage(test_client: TestClient) -> None:
+    parent_response = test_client.post("/sessions", json={"title": "Timeline Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Inspect the workspace and produce a short summary.",
+            "context": "Focus on the top-level notes file.",
+            "toolsets": ["group:fs"],
+            "model": "product-echo/simple",
+            "max_iterations": 2,
+        },
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    def _find_subagent_item():
+        response = test_client.get("/activity/timeline")
+        assert response.status_code == 200
+        for item in response.json()["items"]:
+            if item["task_kind"] == "subagent_execution" and item["session_id"] == child_id:
+                return item
+        return None
+
+    item = _wait_for(_find_subagent_item, timeout=3.0)
+    assert item is not None
+    assert item["lineage"] == {
+        "parent_session_id": parent_id,
+        "parent_session_title": "Timeline Parent",
+        "child_session_id": child_id,
+        "child_session_title": item["session_title"],
+        "goal_summary": "Inspect the workspace and produce a short summary.",
+        "status": item["status"],
+        "task_run_id": item["task_run_id"],
+        "estimated_cost_usd": item["estimated_cost_usd"],
+    }
+    assert all(
+        audit_event.get("payload_json") is None
+        for audit_event in item["audit_log"]
+        if audit_event["event_type"].startswith("subagent")
+    )
+    assert any(
+        entry["summary"] == "Inspect the workspace and produce a short summary."
+        for entry in item["entries"]
+        if entry["type"] == "audit"
+    )

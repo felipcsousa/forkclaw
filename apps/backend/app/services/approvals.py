@@ -123,19 +123,14 @@ class ApprovalService:
                     tool_output=tool_outcome.output_text,
                 )
 
-        assistant_message = self.execution_service.repository.create_message(
-            bundle.session.id,
-            "assistant",
-            result.output_text,
-        )
-        self.execution_service.repository.touch_session(bundle.session)
-        persisted_task_run = self.execution_service.persist_execution_result(
+        persisted = self.execution_service.persist_execution_result(
             agent_id=approval.agent_id,
             task=bundle.task,
             task_run=bundle.task_run,
             session_id=bundle.session.id,
             request=request,
             result=result,
+            assistant_message_text=result.output_text,
         )
 
         refreshed_bundle = self.approvals.get_bundle(approval.id)
@@ -144,10 +139,12 @@ class ApprovalService:
 
         return ApprovalActionResponse(
             approval=self._serialize_bundle(refreshed_bundle),
-            task_run_status=persisted_task_run.status,
+            task_run_status=persisted.task_run.status,
             tool_call_status=refreshed_bundle.tool_call.status,
             output_text=result.output_text,
-            assistant_message_id=assistant_message.id,
+            assistant_message_id=persisted.assistant_message.id
+            if persisted.assistant_message is not None
+            else None,
         )
 
     def deny(self, approval_id: str) -> ApprovalActionResponse:
@@ -165,19 +162,24 @@ class ApprovalService:
             status="denied",
             output_payload={"message": "Approval denied by user."},
         )
-        self.execution_service.repository.complete_task(bundle.task, status="failed")
-        persisted_task_run = self.execution_service.repository.complete_task_run(
-            bundle.task_run,
+        persisted = self.execution_service.persist_terminal_status(
+            agent_id=approval.agent_id,
+            task=bundle.task,
+            task_run=bundle.task_run,
+            session_id=bundle.session.id,
             status="failed",
-            output_json=None,
             error_message="Approval denied by user.",
+            output_json=None,
+            estimated_cost_usd=None,
+            event_type="kernel.execution.failed",
+            event_level="error",
+            event_summary="Execution finished with failure.",
+            event_payload={},
+            assistant_message_text=(
+                f"Approval denied for `{bundle.tool_call.tool_name}`. "
+                "The action was not executed."
+            ),
         )
-        assistant_message = self.execution_service.repository.create_message(
-            bundle.session.id,
-            "assistant",
-            f"Approval denied for `{bundle.tool_call.tool_name}`. The action was not executed.",
-        )
-        self.execution_service.repository.touch_session(bundle.session)
         self.tool_repository.record_audit_event(
             agent_id=approval.agent_id,
             event_type="approval.denied",
@@ -192,10 +194,12 @@ class ApprovalService:
 
         return ApprovalActionResponse(
             approval=self._serialize_bundle(refreshed_bundle),
-            task_run_status=persisted_task_run.status,
+            task_run_status=persisted.task_run.status,
             tool_call_status=refreshed_bundle.tool_call.status,
             output_text="Approval denied. Execution ended without running the tool.",
-            assistant_message_id=assistant_message.id,
+            assistant_message_id=persisted.assistant_message.id
+            if persisted.assistant_message is not None
+            else None,
         )
 
     def _require_pending_bundle(self, approval_id: str) -> ApprovalBundle:

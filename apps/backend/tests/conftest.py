@@ -12,6 +12,7 @@ from app.core.secrets import clear_secret_store_cache
 from app.db.seed import seed_default_data
 from app.db.session import clear_engine_cache, get_db_session
 from app.main import create_app
+from app.services.runtime_supervisor import RuntimeSupervisor
 
 
 def _alembic_config() -> Config:
@@ -36,6 +37,10 @@ def test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("APP_BUNDLED_SKILLS_ROOT", str(bundled_skills_root))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("SCHEDULER_POLL_INTERVAL_SECONDS", "0.2")
+    monkeypatch.setenv("SUBAGENT_WORKER_POLL_INTERVAL_SECONDS", "0.1")
+    monkeypatch.setenv("SUBAGENT_RUN_TIMEOUT_SECONDS", "1.0")
+    monkeypatch.setenv("SUBAGENT_MAX_RUN_TIMEOUT_SECONDS", "2.0")
+    monkeypatch.setenv("SUBAGENT_STUCK_GRACE_SECONDS", "0.1")
     monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
     monkeypatch.setenv("STALE_TASK_RUN_SECONDS", "1")
     monkeypatch.setenv("APP_SECRET_BACKEND", "memory")
@@ -48,7 +53,7 @@ def test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     with get_db_session() as session:
         seed_default_data(session)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(runtime_supervisor=RuntimeSupervisor(get_settings()))) as client:
         yield client
 
     clear_engine_cache()

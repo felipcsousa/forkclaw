@@ -70,14 +70,89 @@ class SessionRecord(TimestampedModel, table=True):
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
     agent_id: str = Field(foreign_key="agents.id", max_length=36, nullable=False, index=True)
+    kind: str = Field(default="main", sa_column=Column(String(50), nullable=False, index=True))
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    root_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    spawn_depth: int = Field(default=0, nullable=False)
     title: str = Field(sa_column=Column(String(200), nullable=False))
     summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False, index=True))
+    delegated_goal: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    delegated_context_snapshot: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    tool_profile: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    model_override: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    max_iterations: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    timeout_seconds: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     started_at: datetime = Field(default_factory=utc_now, sa_column=Column(DateTime(timezone=True)))
     last_message_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True)),
     )
+
+
+class SessionSubagentRun(TimestampedModel, table=True):
+    __tablename__ = "session_subagent_runs"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    launcher_session_id: str = Field(
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=False,
+        index=True,
+    )
+    child_session_id: str = Field(
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=False,
+        index=True,
+    )
+    launcher_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+    )
+    launcher_task_run_id: str | None = Field(
+        default=None,
+        foreign_key="task_runs.id",
+        max_length=36,
+    )
+    task_id: str | None = Field(default=None, foreign_key="tasks.id", max_length=36)
+    task_run_id: str | None = Field(default=None, foreign_key="task_runs.id", max_length=36)
+    parent_summary_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+    )
+    lifecycle_status: str = Field(
+        default="queued",
+        sa_column=Column(String(50), nullable=False, index=True),
+    )
+    started_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    finished_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    cancellation_requested_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    final_summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    final_output_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    estimated_cost_usd: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    error_code: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    error_summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 class Message(TimestampedModel, table=True):

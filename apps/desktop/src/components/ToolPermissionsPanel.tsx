@@ -47,12 +47,6 @@ interface ToolPermissionsPanelProps {
   onToggleSkill: (skillKey: string, enabled: boolean) => void;
 }
 
-const toolModeDescriptions: Record<ToolPermissionLevel, string> = {
-  deny: 'Blocked for every execution.',
-  ask: 'Requires explicit approval before running.',
-  allow: 'Runs automatically inside the current boundary.',
-};
-
 const toolGroupLabels: Record<ToolGroup, string> = {
   'group:fs': 'Filesystem',
   'group:runtime': 'Runtime',

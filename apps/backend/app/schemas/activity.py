@@ -34,6 +34,17 @@ class ActivityTimelineEntryRead(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class ActivitySubagentLineageRead(BaseModel):
+    parent_session_id: str
+    parent_session_title: str | None = None
+    child_session_id: str
+    child_session_title: str | None = None
+    goal_summary: str
+    status: str
+    task_run_id: str | None = None
+    estimated_cost_usd: float | None = None
+
+
 class ActivityTimelineItemRead(BaseModel):
     task_run_id: str
     task_id: str
@@ -49,9 +60,11 @@ class ActivityTimelineItemRead(BaseModel):
     estimated_cost_usd: float | None
     skill_strategy: str | None = None
     resolved_skills: list[SkillSummaryRead] = Field(default_factory=list)
+    lineage: ActivitySubagentLineageRead | None = None
     entries: list[ActivityTimelineEntryRead]
     audit_log: list[ActivityAuditEventRead]
 
 
 class ActivityTimelineResponse(BaseModel):
     items: list[ActivityTimelineItemRead]
+    next_cursor: str | None = None

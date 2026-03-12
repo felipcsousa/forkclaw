@@ -239,6 +239,7 @@ class CronJobRepository:
     def count_recent_sessions(self, agent_id: str, since: datetime) -> int:
         statement = select(SessionRecord).where(
             SessionRecord.agent_id == agent_id,
+            SessionRecord.kind == "main",
             SessionRecord.created_at >= since,
         )
         return len(list(self.session.exec(statement)))
