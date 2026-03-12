@@ -167,6 +167,7 @@ npm run build:desktop:bundle
 Documentacao complementar:
 
 - `docs/architecture.md`
+- `docs/streaming-terminal-operations.md`
 - `docs/distribution.md`
 - `docs/release-checklist.md`
 - `docs/skills-spec-v1.md`
@@ -193,6 +194,10 @@ Documentacao complementar:
 `GET /sessions/{id}/messages`
 
 `POST /sessions/{id}/messages`
+
+`POST /sessions/{id}/messages/async`
+
+`GET /sessions/{id}/events`
 
 `GET /tools/permissions`
 
@@ -257,4 +262,5 @@ Resposta esperada:
 - Em desenvolvimento e testes, o backend pode usar um secret store em memoria; em uso normal, a meta e keychain do sistema
 - O bundle atual ainda usa porta local fixa para o backend sidecar
 - Assinatura, notarizacao, updater e cross-compilation ainda nao foram configurados
-- Streaming e loop autonomo completo continuam fora do escopo
+- O streaming atual e baseado em eventos persistidos por sessao; nao ha token streaming nem multiplexacao dedicada por run
+- O runtime de terminal atual expoe `shell_exec` com resultado estruturado; nao ha PTY interativo nem sessao shell persistente

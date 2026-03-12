@@ -52,5 +52,7 @@ The JSON envelope has this shape:
 
 - The stream uses persisted backend state as the source of truth. It does not emit token deltas.
 - The `data` payload varies by event type and includes the minimum identifiers needed by the frontend, such as `message`, `tool_call_id`, `tool_name`, `approval_id`, and `status`.
+- `tool.started`, `tool.completed`, and `tool.failed` now include persisted `input_json`, `output_json` when available, plus `started_at` and `finished_at` for timeline duration math.
+- `execution.started`, `execution.completed`, and `execution.failed` include `started_at`, `finished_at`, and `error_message` when the backend has a persisted failure reason.
 - When `task_run_id` is provided, the backend closes the SSE response after `approval.requested`, `execution.completed`, or `execution.failed` so task-specific consumers can treat the stream as finite.
 - The current worker is process-local. In a multi-instance deployment, queue claiming and stream fan-out need extra coordination.
