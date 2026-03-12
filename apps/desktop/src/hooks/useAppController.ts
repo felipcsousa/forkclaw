@@ -170,7 +170,11 @@ export function useAppController() {
       preferredSessionId?: string;
       refreshSession?: boolean;
     } = {}) => {
-      const tasks = [loadApprovals(), loadActivity(), loadTools()];
+      const tasks: Promise<unknown>[] = [
+        loadApprovals(),
+        loadActivity(),
+        loadTools(),
+      ];
       if (refreshSession) {
         tasks.unshift(
           preferredSessionId
