@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -34,6 +35,10 @@ class Settings:
     default_activity_poll_seconds: int
     default_heartbeat_interval_seconds: int
     tool_timeout_seconds: float
+    shell_exec_max_timeout_seconds: float
+    shell_exec_max_output_chars: int
+    shell_exec_allowed_cwd_roots: tuple[str, ...]
+    shell_exec_allowed_env_keys: tuple[str, ...]
     web_search_cache_ttl_seconds: int
     web_fetch_cache_ttl_seconds: int
     web_fetch_max_response_bytes: int
@@ -106,6 +111,25 @@ def _build_settings() -> Settings:
             os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
         ),
         tool_timeout_seconds=float(os.getenv("TOOL_TIMEOUT_SECONDS", "15.0")),
+        shell_exec_max_timeout_seconds=float(
+            os.getenv("SHELL_EXEC_MAX_TIMEOUT_SECONDS", "60.0")
+        ),
+        shell_exec_max_output_chars=int(os.getenv("SHELL_EXEC_MAX_OUTPUT_CHARS", "12000")),
+        shell_exec_allowed_cwd_roots=_read_env_list("SHELL_EXEC_ALLOWED_CWD_ROOTS"),
+        shell_exec_allowed_env_keys=_read_env_list(
+            "SHELL_EXEC_ALLOWED_ENV_KEYS",
+            default=(
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "LANG",
+                "LC_ALL",
+                "USER",
+                "LOGNAME",
+            ),
+        ),
         web_search_cache_ttl_seconds=int(os.getenv("WEB_SEARCH_CACHE_TTL_SECONDS", "900")),
         web_fetch_cache_ttl_seconds=int(os.getenv("WEB_FETCH_CACHE_TTL_SECONDS", "900")),
         web_fetch_max_response_bytes=int(
@@ -141,3 +165,18 @@ def get_settings() -> Settings:
 
 def clear_settings_cache() -> None:
     get_settings.cache_clear()
+
+
+def _read_env_list(name: str, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return default
+        if isinstance(parsed, list):
+            return tuple(str(item).strip() for item in parsed if str(item).strip())
+        return default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
