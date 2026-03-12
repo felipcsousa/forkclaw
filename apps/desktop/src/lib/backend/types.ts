@@ -56,3 +56,13 @@ export type {
   ToolRisk,
   ToolStatus,
 } from './legacy';
+export type {
+  SessionExecutionEvent,
+  SessionExecutionEventApprovalPayload,
+  SessionExecutionEventAssistantMessagePayload,
+  SessionExecutionEventRunPayload,
+  SessionExecutionEventSubagentPayload,
+  SessionExecutionEventToolPayload,
+  SessionExecutionStreamConnection,
+  SessionExecutionStreamOptions,
+} from './sessionExecutionStream';

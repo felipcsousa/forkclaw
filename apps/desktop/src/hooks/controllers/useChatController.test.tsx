@@ -12,6 +12,7 @@ const mockFetchSessionSubagent = vi.fn();
 const mockFetchSessionSubagentMessages = vi.fn();
 const mockFetchSessionSubagents = vi.fn();
 const mockSendSessionMessage = vi.fn();
+const mockConnectSessionExecutionStream = vi.fn();
 
 vi.mock('../../lib/backend/sessions', () => ({
   cancelSessionSubagent: (sessionId: string, childSessionId: string) =>
@@ -27,6 +28,15 @@ vi.mock('../../lib/backend/sessions', () => ({
     mockFetchSessionSubagents(sessionId),
   sendSessionMessage: (sessionId: string, content: string) =>
     mockSendSessionMessage(sessionId, content),
+}));
+
+vi.mock('../../lib/backend/sessionExecutionStream', () => ({
+  connectSessionExecutionStream: (options: unknown) => {
+    mockConnectSessionExecutionStream(options);
+    return {
+      close: vi.fn(),
+    };
+  },
 }));
 
 function createRunAsyncAction() {

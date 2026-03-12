@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { vi } from 'vitest';
 
@@ -10,6 +10,10 @@ import {
   DESKTOP_SIDEBAR_PANEL_SIZE,
 } from './components/app-shell-layout';
 import { TooltipProvider } from './components/ui/tooltip';
+import type {
+  SessionExecutionEvent,
+  SessionExecutionStreamOptions,
+} from './lib/backend/sessionExecutionStream';
 
 const baseTimestamp = '2026-03-08T12:00:00Z';
 
@@ -43,6 +47,7 @@ const mockCreateCronJob = vi.fn();
 const mockPauseCronJob = vi.fn();
 const mockActivateCronJob = vi.fn();
 const mockDeleteCronJob = vi.fn();
+const mockConnectSessionExecutionStream = vi.fn();
 const defaultMatchMedia = window.matchMedia;
 const providerLabelMap: Record<string, string> = {
   product_echo: 'Product Echo (local fallback)',
@@ -508,6 +513,17 @@ vi.mock('./lib/backend/tools', () => ({
   updateToolPolicy: (profileId: string) => mockUpdateToolPolicy(profileId),
 }));
 
+vi.mock('./lib/backend/sessionExecutionStream', () => ({
+  connectSessionExecutionStream: (options: SessionExecutionStreamOptions) => {
+    lastSessionExecutionStreamOptions = options;
+    mockConnectSessionExecutionStream(options);
+    options.onOpen?.();
+    return {
+      close: vi.fn(),
+    };
+  },
+}));
+
 const agentConfig = {
   id: 'agent-1',
   slug: 'main',
@@ -538,6 +554,16 @@ const agentConfig = {
   },
 };
 
+let lastSessionExecutionStreamOptions: SessionExecutionStreamOptions | null = null;
+
+function emitSessionExecutionEvent(event: SessionExecutionEvent) {
+  if (!lastSessionExecutionStreamOptions) {
+    throw new Error('Session execution stream was not connected.');
+  }
+
+  lastSessionExecutionStreamOptions.onEvent(event);
+}
+
 function renderApp() {
   return render(
     <TooltipProvider delayDuration={0}>
@@ -549,6 +575,7 @@ function renderApp() {
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lastSessionExecutionStreamOptions = null;
     window.matchMedia = defaultMatchMedia;
     mockFetchAgentConfig.mockResolvedValue(agentConfig);
     mockFetchToolCatalog.mockResolvedValue({
@@ -736,6 +763,116 @@ describe('App', () => {
     expect(mockFetchToolCalls).toHaveBeenCalledTimes(1);
     expect(mockFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
+  });
+
+  it('renders live tool execution inline and consolidates the final assistant response from SSE', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:01:00Z',
+      updated_at: '2026-03-08T12:01:00Z',
+    });
+
+    mockFetchSessions
+      .mockResolvedValueOnce({ items: [session] })
+      .mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages
+      .mockResolvedValueOnce({ session, items: [] })
+      .mockResolvedValueOnce({
+        session,
+        items: [
+          makeMessage({
+            id: 'message-user-live-1',
+            session_id: session.id,
+            content_text: 'Run the workspace checks.',
+            created_at: '2026-03-08T12:02:00Z',
+            updated_at: '2026-03-08T12:02:00Z',
+          }),
+        ],
+      });
+    mockSendSessionMessage.mockResolvedValueOnce({
+      task_id: 'task-live-1',
+      task_run_id: 'run-live-1',
+      session_id: session.id,
+      user_message_id: 'message-user-live-1',
+      assistant_message_id: 'message-assistant-live-1',
+      status: 'running',
+      output_text: '',
+      kernel_name: 'nanobot',
+      model_name: 'product-echo/simple',
+      tools_used: [],
+      finished_at: null,
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Persistent Chat' })).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(mockConnectSessionExecutionStream).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.change(screen.getByLabelText(/message/i), {
+      target: { value: 'Run the workspace checks.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(mockSendSessionMessage).toHaveBeenCalledWith(
+        'session-1',
+        'Run the workspace checks.',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByText('Run the workspace checks.')).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      emitSessionExecutionEvent({
+        event_id: 'evt-tool-live-1',
+        event_type: 'tool_call.completed',
+        session_id: session.id,
+        task_run_id: 'run-live-1',
+        created_at: '2026-03-08T12:02:01Z',
+        tool: {
+          tool_call_id: 'call-shell-live-1',
+          tool_name: 'shell',
+          status: 'completed',
+          started_at: '2026-03-08T12:02:00Z',
+          finished_at: '2026-03-08T12:02:01Z',
+          input_json: '{"cmd":"npm test"}',
+          output_json:
+            '{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":""}',
+        },
+        raw: {},
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('Exit 0 · PASS src/app.test.ts')).toBeInTheDocument(),
+    );
+    expect(screen.getByText('shell')).toBeInTheDocument();
+
+    await act(async () => {
+      emitSessionExecutionEvent({
+        event_id: 'evt-message-live-1',
+        event_type: 'assistant.message.completed',
+        session_id: session.id,
+        task_run_id: 'run-live-1',
+        created_at: '2026-03-08T12:02:02Z',
+        assistant_message: {
+          assistant_message_id: 'message-assistant-live-1',
+          user_message_id: 'message-user-live-1',
+          content_text: 'Workspace checks finished successfully.',
+        },
+        raw: {},
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Workspace checks finished successfully.'),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('renders inline subagent cards, a child-session index, and opens the child session sheet', async () => {
