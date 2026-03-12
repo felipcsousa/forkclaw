@@ -386,7 +386,15 @@ export function useAppController() {
   ]);
 
   useEffect(() => {
-    if (view !== 'chat' || !activeSession) {
+    const shouldPollChatSession =
+      view === 'chat' && activeSession && chat.shouldPollActiveSession;
+    const shouldPollSubagentSheet =
+      view === 'chat' &&
+      isSubagentSheetOpen &&
+      activeSubagent &&
+      activeSubagentParentSessionId;
+
+    if (!shouldPollChatSession && !shouldPollSubagentSheet) {
       return undefined;
     }
 
@@ -396,8 +404,10 @@ export function useAppController() {
       1000,
     );
     const intervalId = window.setInterval(() => {
-      void loadSession(activeSession, { silent: true });
-      if (isSubagentSheetOpen && activeSubagent && activeSubagentParentSessionId) {
+      if (shouldPollChatSession && activeSession) {
+        void loadSession(activeSession, { silent: true });
+      }
+      if (shouldPollSubagentSheet && activeSubagent && activeSubagentParentSessionId) {
         void loadSubagentDetail(activeSubagentParentSessionId, activeSubagent.id, {
           silent: true,
         });
@@ -414,6 +424,7 @@ export function useAppController() {
     activeSession,
     activeSubagent,
     activeSubagentParentSessionId,
+    chat.shouldPollActiveSession,
     isSubagentSheetOpen,
     loadSession,
     loadSubagentDetail,

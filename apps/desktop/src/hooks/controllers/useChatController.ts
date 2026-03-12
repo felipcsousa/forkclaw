@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import {
   cancelSessionSubagent,
@@ -9,13 +9,31 @@ import {
   fetchSessionSubagentMessages,
   fetchSessionSubagents,
   sendSessionMessage,
+  type AgentExecutionResponse,
   type MessageRecord,
   type SessionRecord,
+  type SessionMessagesResponse,
   type SessionSubagentsListResponse,
   type SubagentSessionRecord,
 } from '../../lib/backend/sessions';
+import {
+  connectSessionExecutionStream,
+  type SessionExecutionEvent,
+} from '../../lib/backend/sessionExecutionStream';
 import type { PendingSetter, RunAsyncAction } from './shared';
+import {
+  buildChatTimelineItems,
+  chatExecutionStateReducer,
+  createInitialChatExecutionState,
+} from './chatExecutionState';
 import { toErrorMessage } from './shared';
+
+type ExecutionStreamStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'disconnected';
 
 export function useChatController({
   runAsyncAction,
@@ -53,6 +71,19 @@ export function useChatController({
   >(null);
   const [subagentDetailErrorMessage, setSubagentDetailErrorMessage] =
     useState<string | null>(null);
+  const [executionStreamStatus, setExecutionStreamStatus] =
+    useState<ExecutionStreamStatus>('idle');
+  const [executionStreamErrorMessage, setExecutionStreamErrorMessage] =
+    useState<string | null>(null);
+  const [executionStreamReconnectAttempt, setExecutionStreamReconnectAttempt] =
+    useState(0);
+  const [runsState, dispatchRuns] = useReducer(
+    chatExecutionStateReducer,
+    undefined,
+    createInitialChatExecutionState,
+  );
+  const activeSessionId = activeSession?.id || null;
+  const activeSessionKind = activeSession?.kind || null;
 
   const clearActiveSessionState = useCallback(() => {
     setActiveSession(null);
@@ -64,6 +95,9 @@ export function useChatController({
     setSubagentsErrorMessage(null);
     setSubagentDetailErrorMessage(null);
     setIsSubagentSheetOpen(false);
+    setExecutionStreamStatus('idle');
+    setExecutionStreamErrorMessage(null);
+    setExecutionStreamReconnectAttempt(0);
   }, []);
 
   const loadSessionsIndex = useCallback(
@@ -119,7 +153,7 @@ export function useChatController({
     async (
       session: SessionRecord,
       { silent = false }: { silent?: boolean } = {},
-    ) => {
+    ): Promise<SessionMessagesResponse | null> => {
       const response = await runAsyncAction(
         () => fetchSessionMessages(session.id),
         {
@@ -257,16 +291,22 @@ export function useChatController({
   );
 
   const refreshSessionContext = useCallback(
-    async (preferredSessionId?: string): Promise<SessionRecord | null> => {
+    async (preferredSessionId?: string): Promise<SessionMessagesResponse | null> => {
       const nextSession = await refreshSessionsAndSelection(preferredSessionId);
       if (!nextSession) {
         return null;
       }
 
-      await loadSession(nextSession, { silent: true });
-      return nextSession;
+      return loadSession(nextSession, { silent: true });
     },
     [loadSession, refreshSessionsAndSelection],
+  );
+
+  const refreshSessionIndexOnly = useCallback(
+    async (preferredSessionId?: string) => {
+      await refreshSessionsAndSelection(preferredSessionId);
+    },
+    [refreshSessionsAndSelection],
   );
 
   const adoptNewSession = useCallback((session: SessionRecord) => {
@@ -454,6 +494,83 @@ export function useChatController({
     return next.id;
   }, [activeSubagent, activeSubagentParentSessionId, handleOpenSubagent, subagents]);
 
+  const handleExecutionEvent = useCallback(
+    (event: SessionExecutionEvent) => {
+      dispatchRuns({
+        type: 'run/event-received',
+        sessionId: event.session_id,
+        event,
+      });
+
+      if (event.event_type.startsWith('subagent.')) {
+        void loadSubagents(event.session_id, { silent: true });
+      }
+
+      const isTerminalEvent =
+        event.event_type === 'assistant.message.completed' ||
+        event.event_type === 'kernel.execution.completed' ||
+        event.event_type === 'kernel.execution.failed';
+      if (!isTerminalEvent) {
+        return;
+      }
+
+      void refreshSessionIndexOnly(event.session_id);
+
+      if (
+        event.event_type === 'assistant.message.completed' &&
+        event.assistant_message?.assistant_message_id &&
+        event.assistant_message?.content_text
+      ) {
+        return;
+      }
+
+      void refreshSessionContext(event.session_id);
+    },
+    [
+      loadSubagents,
+      refreshSessionContext,
+      refreshSessionIndexOnly,
+    ],
+  );
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionKind !== 'main') {
+      setExecutionStreamStatus('idle');
+      setExecutionStreamErrorMessage(null);
+      setExecutionStreamReconnectAttempt(0);
+      return undefined;
+    }
+
+    setExecutionStreamStatus('connecting');
+    setExecutionStreamErrorMessage(null);
+    setExecutionStreamReconnectAttempt(0);
+
+    const connection = connectSessionExecutionStream({
+      sessionId: activeSessionId,
+      onOpen: () => {
+        setExecutionStreamStatus('connected');
+        setExecutionStreamErrorMessage(null);
+        setExecutionStreamReconnectAttempt(0);
+      },
+      onEvent: handleExecutionEvent,
+      onError: (error) => {
+        setExecutionStreamStatus('disconnected');
+        setExecutionStreamErrorMessage(error.message);
+      },
+      onDisconnect: () => {
+        setExecutionStreamStatus('disconnected');
+      },
+      onReconnect: (attempt) => {
+        setExecutionStreamStatus('reconnecting');
+        setExecutionStreamReconnectAttempt(attempt);
+      },
+    });
+
+    return () => {
+      connection.close();
+    };
+  }, [activeSessionId, activeSessionKind, handleExecutionEvent]);
+
   const handleSendMessage = useCallback(
     async (afterSend?: (sessionId: string) => Promise<void>) => {
       const trimmed = draft.trim();
@@ -467,10 +584,30 @@ export function useChatController({
         return null;
       }
 
+      const localRunId = `optimistic:${session.id}:${Date.now()}`;
+      dispatchRuns({
+        type: 'run/optimistic-created',
+        sessionId: session.id,
+        localRunId,
+        prompt: trimmed,
+        createdAt: new Date().toISOString(),
+      });
+
       const sent = await runAsyncAction(
-        async () => {
+        async (): Promise<SessionRecord> => {
           setDraft('');
-          await sendSessionMessage(session.id, trimmed);
+          const response = (await sendSessionMessage(
+            session.id,
+            trimmed,
+          )) as Partial<AgentExecutionResponse> | undefined;
+          if (response) {
+            dispatchRuns({
+              type: 'run/response-bound',
+              sessionId: session.id,
+              localRunId,
+              response,
+            });
+          }
           await refreshSessionContext(session.id);
           if (afterSend) {
             await afterSend(session.id);
@@ -496,6 +633,33 @@ export function useChatController({
   const activeSubagentIndex = activeSubagent
     ? subagents.findIndex((item) => item.id === activeSubagent.id)
     : -1;
+  const timelineItems = useMemo(
+    () =>
+      buildChatTimelineItems({
+        activeSessionId: activeSession?.id || null,
+        messages,
+        runsState,
+        subagents,
+      }),
+    [activeSession?.id, messages, runsState, subagents],
+  );
+  const liveRuns = useMemo(() => {
+    if (!activeSession) {
+      return [];
+    }
+
+    const runIds = runsState.sessionRunIds[activeSession.id] || [];
+    return runIds
+      .map((runId) => runsState.runsById[runId])
+      .filter((run): run is NonNullable<typeof run> => Boolean(run));
+  }, [activeSession, runsState.runsById, runsState.sessionRunIds]);
+  const hasActiveLiveRuns = liveRuns.some(
+    (run) =>
+      run.status === 'connecting' ||
+      run.status === 'running' ||
+      run.status === 'awaiting_approval' ||
+      run.status === 'disconnected',
+  );
 
   return {
     activeSession,
@@ -509,6 +673,10 @@ export function useChatController({
     cancellingSubagentId,
     clearActiveSessionState,
     draft,
+    executionStreamErrorMessage,
+    executionStreamReconnectAttempt,
+    executionStreamStatus,
+    hasActiveLiveRuns,
     handleCancelSubagent,
     handleCloseSubagent,
     handleCreateSession,
@@ -526,6 +694,7 @@ export function useChatController({
     isLoadingSubagents,
     isSending,
     isSubagentSheetOpen,
+    liveRuns,
     loadSession,
     loadSubagentDetail,
     loadSubagentMessages,
@@ -536,8 +705,13 @@ export function useChatController({
     sessions,
     setDraft,
     setIsSubagentSheetOpen,
+    shouldPollActiveSession:
+      Boolean(activeSession) &&
+      hasActiveLiveRuns &&
+      executionStreamStatus !== 'connected',
     subagentDetailErrorMessage,
     subagents,
     subagentsErrorMessage,
+    timelineItems,
   };
 }

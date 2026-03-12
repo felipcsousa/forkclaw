@@ -6,6 +6,7 @@ export * from './backend/connection';
 export * from './backend/health';
 export * from './backend/jobs';
 export * from './backend/settings';
+export * from './backend/sessionExecutionStream';
 export * from './backend/sessions';
 export * from './backend/tools';
 export * from './backend/types';

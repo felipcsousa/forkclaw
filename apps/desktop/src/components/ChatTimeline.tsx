@@ -3,13 +3,23 @@ import { Bot, User } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { anchoredSubagentsForMessage } from '@/lib/subagents';
 import { cn } from '@/lib/utils';
-import type { MessageRecord, SessionRecord, SubagentSessionRecord } from '../lib/backend';
+import type { SessionRecord, SubagentSessionRecord } from '../lib/backend';
+import type { ChatTimelineItem } from '../hooks/controllers/chatExecutionState';
+import { AssistantRunCard } from './AssistantRunCard';
 import { ParentSubagentInlineCard } from './ParentSubagentInlineCard';
 
 interface ChatTimelineProps {
   session: SessionRecord | null;
-  messages: MessageRecord[];
+  timelineItems: ChatTimelineItem[];
   subagents: SubagentSessionRecord[];
+  executionStreamStatus:
+    | 'idle'
+    | 'connecting'
+    | 'connected'
+    | 'reconnecting'
+    | 'disconnected';
+  executionStreamReconnectAttempt: number;
+  executionStreamErrorMessage: string | null;
   isLoading: boolean;
   isSending: boolean;
   cancellingSubagentId: string | null;
@@ -19,8 +29,11 @@ interface ChatTimelineProps {
 
 export function ChatTimeline({
   session,
-  messages,
+  timelineItems,
   subagents,
+  executionStreamStatus,
+  executionStreamReconnectAttempt,
+  executionStreamErrorMessage,
   isLoading,
   isSending,
   cancellingSubagentId,
@@ -49,11 +62,11 @@ export function ChatTimeline({
     <section className="flex min-h-0 flex-1 flex-col">
       <ScrollArea className="min-h-0 flex-1 py-4">
         <div className="mx-auto w-full max-w-[58rem]">
-          {isLoading && messages.length === 0 ? (
+          {isLoading && timelineItems.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <p className="text-sm text-muted-foreground animate-pulse">Loading messages...</p>
             </div>
-          ) : messages.length === 0 ? (
+          ) : timelineItems.length === 0 ? (
             <div className="flex min-h-[24rem] items-center justify-center py-6">
               <div className="animate-appear w-full max-w-md text-center">
                 <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-muted/60">
@@ -69,7 +82,24 @@ export function ChatTimeline({
             </div>
           ) : (
             <div className="space-y-5 pb-2">
-              {messages.map((message, index) => {
+              {timelineItems.map((item, index) => {
+                if (item.kind === 'run') {
+                  return (
+                    <AssistantRunCard
+                      key={item.run.id}
+                      run={item.run}
+                      subagents={item.subagents}
+                      streamStatus={executionStreamStatus}
+                      streamReconnectAttempt={executionStreamReconnectAttempt}
+                      streamErrorMessage={executionStreamErrorMessage}
+                      cancellingSubagentId={cancellingSubagentId}
+                      onOpenSubagent={onOpenSubagent}
+                      onCancelSubagent={onCancelSubagent}
+                    />
+                  );
+                }
+
+                const { message } = item;
                 const isUser = message.role === 'user';
                 const anchoredSubagents = anchoredSubagentsForMessage(subagents, message.id);
 
@@ -79,7 +109,9 @@ export function ChatTimeline({
                       className={cn(
                         'animate-fade-in flex gap-3.5',
                         isUser ? 'justify-end' : 'justify-start',
-                        isSending && index === messages.length - 1 && 'opacity-60',
+                        isSending &&
+                          index === timelineItems.length - 1 &&
+                          'opacity-60',
                       )}
                     >
                       {!isUser ? (
@@ -113,9 +145,9 @@ export function ChatTimeline({
                           >
                             {message.created_at
                               ? new Date(message.created_at).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
                               : ''}
                           </span>
                         </div>
