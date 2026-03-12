@@ -75,6 +75,10 @@ class SubagentDelegationService:
         goal_summary = self._goal_summary(goal)
         parent_messages = self.repository.list_recent_messages(parent.id)
         snapshot = self._build_parent_snapshot(parent_title=parent.title, messages=parent_messages)
+        launcher_message_id = self._resolve_launcher_message_id(
+            parent_session_id=parent.id,
+            explicit_launcher_message_id=payload.launcher_message_id,
+        )
         tool_permissions = self.execution_service.request_builder.list_active_tool_permissions(
             parent.agent_id
         )
@@ -96,6 +100,8 @@ class SubagentDelegationService:
                 max_iterations=payload.max_iterations,
                 timeout_seconds=timeout_seconds,
                 max_concurrency=settings.subagent_max_concurrency_per_session,
+                launcher_message_id=launcher_message_id,
+                launcher_task_run_id=payload.launcher_task_run_id,
             )
         )
         self._commit_action(
@@ -579,6 +585,8 @@ class SubagentDelegationService:
         max_iterations: int | None,
         timeout_seconds: float,
         max_concurrency: int,
+        launcher_message_id: str | None,
+        launcher_task_run_id: str | None,
     ) -> tuple[Any, Any, Any]:
         def _spawn(repository: SubagentRepository) -> tuple[str, str, str]:
             parent, child, run = repository.spawn_subagent(
@@ -590,6 +598,8 @@ class SubagentDelegationService:
                 max_iterations=max_iterations,
                 timeout_seconds=timeout_seconds,
                 max_concurrency=max_concurrency,
+                launcher_message_id=launcher_message_id,
+                launcher_task_run_id=launcher_task_run_id,
             )
             return parent.id, child.id, run.id
 
@@ -737,6 +747,24 @@ class SubagentDelegationService:
     @staticmethod
     def _goal_summary(goal: str) -> str:
         return " ".join(goal.split())[:160]
+
+    def _resolve_launcher_message_id(
+        self,
+        *,
+        parent_session_id: str,
+        explicit_launcher_message_id: str | None,
+    ) -> str | None:
+        if explicit_launcher_message_id:
+            message = self.repository.get_message(explicit_launcher_message_id)
+            if message is None or message.session_id != parent_session_id:
+                msg = "Launcher message must belong to the parent session."
+                raise ValueError(msg)
+            return message.id
+
+        latest_parent_messages = self.repository.list_recent_messages(parent_session_id, limit=1)
+        if not latest_parent_messages:
+            return None
+        return latest_parent_messages[-1].id
 
     @staticmethod
     def _event_payload(

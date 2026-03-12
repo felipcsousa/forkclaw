@@ -20,6 +20,8 @@ from app.models.entities import (
 )
 
 TERMINAL_SUBAGENT_STATUSES = {"completed", "failed", "cancelled", "timed_out"}
+
+
 class SubagentRepository:
     def __init__(self, session: Session):
         self.session = session
@@ -38,6 +40,12 @@ class SubagentRepository:
         if not task_run_id:
             return None
         statement = select(TaskRun).where(TaskRun.id == task_run_id)
+        return self.session.exec(statement).first()
+
+    def get_message(self, message_id: str | None) -> Message | None:
+        if not message_id:
+            return None
+        statement = select(Message).where(Message.id == message_id)
         return self.session.exec(statement).first()
 
     def create_subagent_session(
@@ -103,6 +111,8 @@ class SubagentRepository:
         max_iterations: int | None,
         timeout_seconds: float,
         max_concurrency: int,
+        launcher_message_id: str | None = None,
+        launcher_task_run_id: str | None = None,
     ) -> tuple[SessionRecord, SessionRecord, SessionSubagentRun]:
         parent = self.get_session(parent_session_id)
         if parent is None:
@@ -131,6 +141,8 @@ class SubagentRepository:
         run = self.create_subagent_run(
             launcher_session_id=parent.id,
             child_session_id=child.id,
+            launcher_message_id=launcher_message_id,
+            launcher_task_run_id=launcher_task_run_id,
         )
         self.session.flush()
         return parent, child, run

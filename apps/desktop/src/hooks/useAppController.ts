@@ -162,12 +162,42 @@ export function useAppController() {
     [focusChatView, returnToParentSession],
   );
 
+  const refreshExecutionContext = useCallback(
+    async ({
+      preferredSessionId,
+      refreshSession = true,
+    }: {
+      preferredSessionId?: string;
+      refreshSession?: boolean;
+    } = {}) => {
+      const tasks = [loadApprovals(), loadActivity(), loadTools()];
+      if (refreshSession) {
+        tasks.unshift(
+          preferredSessionId
+            ? refreshSessionContext(preferredSessionId)
+            : refreshSessionsAndSelection(),
+        );
+      }
+      await Promise.all(tasks);
+    },
+    [
+      loadActivity,
+      loadApprovals,
+      loadTools,
+      refreshSessionContext,
+      refreshSessionsAndSelection,
+    ],
+  );
+
   const handleSendMessage = useCallback(
     async () =>
-      sendMessage(async () => {
-        await Promise.all([loadApprovals(), loadActivity()]);
+      sendMessage(async (sessionId) => {
+        await refreshExecutionContext({
+          preferredSessionId: sessionId,
+          refreshSession: false,
+        });
       }),
-    [loadActivity, loadApprovals, sendMessage],
+    [refreshExecutionContext, sendMessage],
   );
 
   const handleSaveOperationalSettings = useCallback(async () => {
@@ -189,22 +219,13 @@ export function useAppController() {
 
       focusChatView();
       const preferredSessionId = response.approval.session_id || undefined;
-      await Promise.all([
-        preferredSessionId
-          ? refreshSessionContext(preferredSessionId)
-          : refreshSessionsAndSelection(),
-        loadApprovals(),
-        loadActivity(),
-      ]);
+      await refreshExecutionContext({ preferredSessionId });
       return response;
     },
     [
       approvePendingApproval,
       focusChatView,
-      loadActivity,
-      loadApprovals,
-      refreshSessionContext,
-      refreshSessionsAndSelection,
+      refreshExecutionContext,
     ],
   );
 
@@ -217,22 +238,13 @@ export function useAppController() {
 
       focusChatView();
       const preferredSessionId = response.approval.session_id || undefined;
-      await Promise.all([
-        preferredSessionId
-          ? refreshSessionContext(preferredSessionId)
-          : refreshSessionsAndSelection(),
-        loadApprovals(),
-        loadActivity(),
-      ]);
+      await refreshExecutionContext({ preferredSessionId });
       return response;
     },
     [
       denyPendingApproval,
       focusChatView,
-      loadActivity,
-      loadApprovals,
-      refreshSessionContext,
-      refreshSessionsAndSelection,
+      refreshExecutionContext,
     ],
   );
 

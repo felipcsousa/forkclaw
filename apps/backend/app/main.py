@@ -2,6 +2,7 @@ import logging
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from json import dumps
 from time import perf_counter
 from uuid import uuid4
 
@@ -21,6 +22,22 @@ from app.services.runtime_supervisor import RuntimeSupervisor
 def _request_id_from(request: Request) -> str:
     value = getattr(request.state, "request_id", None)
     return value if isinstance(value, str) and value else "unknown"
+
+
+def _sanitize_validation_errors(errors: list[dict]) -> list[dict]:
+    sanitized: list[dict] = []
+    for error in errors:
+        normalized = dict(error)
+        context = normalized.get("ctx")
+        if isinstance(context, dict):
+            normalized["ctx"] = {
+                key: value
+                if isinstance(value, (str, int, float, bool)) or value is None
+                else str(value)
+                for key, value in context.items()
+            }
+        sanitized.append(normalized)
+    return sanitized
 
 
 @asynccontextmanager
@@ -119,15 +136,16 @@ def create_app(
         exc: RequestValidationError,
     ) -> JSONResponse:
         request_id = _request_id_from(request)
+        errors = _sanitize_validation_errors(exc.errors())
         logger.warning(
             "request.validation_failed request_id=%s path=%s errors=%s",
             request_id,
             request.url.path,
-            exc.errors(),
+            dumps(errors, ensure_ascii=False),
         )
         return JSONResponse(
             status_code=422,
-            content={"detail": exc.errors(), "request_id": request_id},
+            content={"detail": errors, "request_id": request_id},
             headers={"X-Request-ID": request_id},
         )
 

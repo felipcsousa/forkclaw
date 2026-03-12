@@ -1564,6 +1564,37 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     assert parent_response.status_code == 201
     parent_id = parent_response.json()["id"]
 
+    with get_db_session() as session:
+        parent_message = Message(
+            session_id=parent_id,
+            role="user",
+            status="committed",
+            sequence_number=1,
+            content_text="Please audit the workspace for stale files.",
+        )
+        parent_task = Task(
+            agent_id=session.exec(select(Agent.id).where(Agent.is_default.is_(True))).one(),
+            session_id=parent_id,
+            title="Parent orchestration",
+            kind="agent_execution",
+            status="running",
+            payload_json=json.dumps({"message": parent_message.content_text}),
+        )
+        session.add(parent_message)
+        session.flush()
+        session.add(parent_task)
+        session.flush()
+        parent_task_run = TaskRun(
+            task_id=parent_task.id,
+            status="running",
+            attempt=1,
+            started_at=utc_now(),
+        )
+        session.add(parent_task_run)
+        session.commit()
+        parent_message_id = parent_message.id
+        parent_task_run_id = parent_task_run.id
+
     spawn_response = test_client.post(
         f"/sessions/{parent_id}/subagents",
         json={
@@ -1572,6 +1603,8 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
             "toolsets": ["group:fs", "group:web"],
             "model": "product-echo/simple",
             "max_iterations": 20,
+            "launcher_message_id": parent_message_id,
+            "launcher_task_run_id": parent_task_run_id,
         },
     )
 
@@ -1629,22 +1662,50 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     assert child_row["timeout_seconds"] == 1.0
     assert run_row["launcher_session_id"] == parent_id
     assert run_row["child_session_id"] == child_id
-    assert run_row["launcher_message_id"] is None
-    assert run_row["launcher_task_run_id"] is None
+    assert run_row["launcher_message_id"] == parent_message_id
+    assert run_row["launcher_task_run_id"] == parent_task_run_id
     assert run_row["parent_summary_message_id"] is None
     assert run_row["lifecycle_status"] == "queued"
     assert run_row["cancellation_requested_at"] is None
     assert run_row["final_summary"] is None
     assert run_row["final_output_json"] is None
 
+    fallback_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Fallback anchor",
+            "toolsets": ["group:fs"],
+        },
+    )
+    assert fallback_response.status_code == 201
+    fallback_child_id = fallback_response.json()["child_session_id"]
+
+    with get_db_session() as session:
+        fallback_run = session.connection().execute(
+            text(
+                """
+                SELECT launcher_message_id, launcher_task_run_id
+                FROM session_subagent_runs
+                WHERE child_session_id = :child_id
+                """
+            ),
+            {"child_id": fallback_child_id},
+        ).mappings().one()
+
+    assert fallback_run["launcher_message_id"] == parent_message_id
+    assert fallback_run["launcher_task_run_id"] is None
+
     list_response = test_client.get(f"/sessions/{parent_id}/subagents")
     assert list_response.status_code == 200
     list_payload = list_response.json()
-    assert len(list_payload["items"]) == 1
-    assert list_payload["items"][0]["id"] == child_id
-    assert list_payload["items"][0]["kind"] == "subagent"
-    assert list_payload["items"][0]["timeout_seconds"] == 1.0
-    assert list_payload["items"][0]["run"]["lifecycle_status"] == "queued"
+    assert len(list_payload["items"]) == 2
+    items_by_id = {item["id"]: item for item in list_payload["items"]}
+    assert set(items_by_id) == {child_id, fallback_child_id}
+    assert items_by_id[child_id]["kind"] == "subagent"
+    assert items_by_id[child_id]["timeout_seconds"] == 1.0
+    assert items_by_id[child_id]["run"]["lifecycle_status"] == "queued"
+    assert items_by_id[fallback_child_id]["run"]["launcher_message_id"] == parent_message_id
+    assert items_by_id[fallback_child_id]["run"].get("launcher_task_run_id") is None
 
     detail_response = test_client.get(f"/sessions/{parent_id}/subagents/{child_id}")
     assert detail_response.status_code == 200
@@ -1761,6 +1822,13 @@ def test_subagent_spawn_validates_parent_kind_toolsets_and_concurrency(
         json={"goal": "Do work", "toolsets": ["unknown-group"]},
     )
     assert invalid_toolset.status_code == 400
+
+    blank_goal = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "   ", "toolsets": ["group:fs"]},
+    )
+    assert blank_goal.status_code == 422
+    assert test_client.get(f"/sessions/{parent_id}/subagents").json()["items"] == []
 
     child_response = test_client.post(
         f"/sessions/{parent_id}/subagents",

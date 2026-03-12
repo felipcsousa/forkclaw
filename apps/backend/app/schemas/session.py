@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import Field as PydanticField
 
 SessionKind = Literal["main", "subagent"]
@@ -67,6 +67,17 @@ class SubagentSpawnRequest(BaseModel):
     model: str | None = None
     max_iterations: int | None = PydanticField(default=None, ge=1)
     timeout_seconds: float | None = PydanticField(default=None, gt=0)
+    launcher_message_id: str | None = None
+    launcher_task_run_id: str | None = None
+
+    @field_validator("goal")
+    @classmethod
+    def _trim_and_validate_goal(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            msg = "String should have at least 1 character"
+            raise ValueError(msg)
+        return trimmed
 
 
 class SubagentSpawnResponse(BaseModel):

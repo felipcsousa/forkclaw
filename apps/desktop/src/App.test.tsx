@@ -659,7 +659,7 @@ describe('App', () => {
     );
   });
 
-  it('refreshes only session, approvals, and activity after sending a message', async () => {
+  it('refreshes session, approvals, activity, and tooling after sending a message', async () => {
     const session = makeSession({
       last_message_at: '2026-03-08T12:01:00Z',
       updated_at: '2026-03-08T12:01:00Z',
@@ -704,6 +704,17 @@ describe('App', () => {
     });
     mockFetchApprovals.mockResolvedValueOnce({ items: [] });
     mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+    mockFetchToolCatalog.mockResolvedValueOnce({ items: [makeToolCatalogEntry()] });
+    mockFetchToolPolicy.mockResolvedValueOnce(makeToolPolicy());
+    mockFetchToolPermissions.mockResolvedValueOnce({
+      workspace_root: '/workspace',
+      items: [makeToolPermission()],
+    });
+    mockFetchToolCalls.mockResolvedValueOnce({ items: [] });
+    mockFetchSkills.mockResolvedValueOnce({
+      strategy: 'all_eligible',
+      items: [makeSkill()],
+    });
 
     fireEvent.change(screen.getByLabelText(/message/i), {
       target: { value: 'hello kernel' },
@@ -719,11 +730,11 @@ describe('App', () => {
     expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
     expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
     expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
-    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
-    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
-    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
-    expect(mockFetchToolCalls).not.toHaveBeenCalled();
-    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchToolCatalog).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPolicy).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPermissions).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCalls).toHaveBeenCalledTimes(1);
+    expect(mockFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
   });
 
@@ -1605,7 +1616,7 @@ describe('App', () => {
     );
   });
 
-  it('refreshes only approvals, activity, and the affected session after approving', async () => {
+  it('refreshes approvals, activity, the affected session, and tooling after approving', async () => {
     const session = makeSession({
       last_message_at: '2026-03-08T12:01:00Z',
       updated_at: '2026-03-08T12:01:00Z',
@@ -1661,6 +1672,17 @@ describe('App', () => {
     });
     mockFetchApprovals.mockResolvedValueOnce({ items: [] });
     mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+    mockFetchToolCatalog.mockResolvedValueOnce({ items: [makeToolCatalogEntry()] });
+    mockFetchToolPolicy.mockResolvedValueOnce(makeToolPolicy());
+    mockFetchToolPermissions.mockResolvedValueOnce({
+      workspace_root: '/workspace',
+      items: [makeToolPermission()],
+    });
+    mockFetchToolCalls.mockResolvedValueOnce({ items: [] });
+    mockFetchSkills.mockResolvedValueOnce({
+      strategy: 'all_eligible',
+      items: [makeSkill()],
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve Action' }));
 
@@ -1673,15 +1695,15 @@ describe('App', () => {
     expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
     expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
     expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
-    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
-    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
-    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
-    expect(mockFetchToolCalls).not.toHaveBeenCalled();
-    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchToolCatalog).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPolicy).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPermissions).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCalls).toHaveBeenCalledTimes(1);
+    expect(mockFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
   });
 
-  it('refreshes only approvals, activity, and the affected session after denying', async () => {
+  it('refreshes approvals, activity, the affected session, and tooling after denying', async () => {
     const session = makeSession({
       last_message_at: '2026-03-08T12:01:00Z',
       updated_at: '2026-03-08T12:01:00Z',
@@ -1737,6 +1759,17 @@ describe('App', () => {
     });
     mockFetchApprovals.mockResolvedValueOnce({ items: [] });
     mockFetchActivityTimeline.mockResolvedValueOnce({ items: [] });
+    mockFetchToolCatalog.mockResolvedValueOnce({ items: [makeToolCatalogEntry()] });
+    mockFetchToolPolicy.mockResolvedValueOnce(makeToolPolicy());
+    mockFetchToolPermissions.mockResolvedValueOnce({
+      workspace_root: '/workspace',
+      items: [makeToolPermission()],
+    });
+    mockFetchToolCalls.mockResolvedValueOnce({ items: [] });
+    mockFetchSkills.mockResolvedValueOnce({
+      strategy: 'all_eligible',
+      items: [makeSkill()],
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
 
@@ -1749,11 +1782,11 @@ describe('App', () => {
     expect(mockFetchSessionSubagents).toHaveBeenCalledTimes(1);
     expect(mockFetchApprovals).toHaveBeenCalledTimes(1);
     expect(mockFetchActivityTimeline).toHaveBeenCalledTimes(1);
-    expect(mockFetchToolCatalog).not.toHaveBeenCalled();
-    expect(mockFetchToolPolicy).not.toHaveBeenCalled();
-    expect(mockFetchToolPermissions).not.toHaveBeenCalled();
-    expect(mockFetchToolCalls).not.toHaveBeenCalled();
-    expect(mockFetchSkills).not.toHaveBeenCalled();
+    expect(mockFetchToolCatalog).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPolicy).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolPermissions).toHaveBeenCalledTimes(1);
+    expect(mockFetchToolCalls).toHaveBeenCalledTimes(1);
+    expect(mockFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
   });
 
