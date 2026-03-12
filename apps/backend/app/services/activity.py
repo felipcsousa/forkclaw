@@ -37,6 +37,12 @@ PUBLIC_SUBAGENT_EVENT_TYPES = {
     "subagent.timed_out",
 }
 
+PUBLIC_TOOL_EVENT_TYPES = {
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+}
+
 
 @dataclass
 class ActivityPreloadContext:
@@ -133,7 +139,15 @@ class ActivityService:
         approvals_by_task, approvals_by_tool_call = (
             self.repository.list_approvals_for_tasks_or_tool_calls(task_ids, tool_call_ids)
         )
-        lineage_by_task_run = self.repository.list_subagent_lineage_by_task_run_ids(task_run_ids)
+        has_subagent_runs = any(
+            task.kind == "subagent_execution"
+            for _task_run, task, _session, _cron in rows
+        )
+        lineage_by_task_run = (
+            self.repository.list_subagent_lineage_by_task_run_ids(task_run_ids)
+            if has_subagent_runs
+            else {}
+        )
 
         approval_ids = [
             approval.id
@@ -428,7 +442,8 @@ class ActivityService:
         for event in audit_events:
             normalized_type = ActivityService._normalize_subagent_event_type(event.event_type)
             is_public_subagent_event = normalized_type in PUBLIC_SUBAGENT_EVENT_TYPES
-            if event.level == "info" and not is_public_subagent_event:
+            is_public_tool_event = normalized_type in PUBLIC_TOOL_EVENT_TYPES
+            if event.level == "info" and not is_public_subagent_event and not is_public_tool_event:
                 continue
             payload = ActivityService._parse_json(event.payload_json)
             items.append(
@@ -492,6 +507,8 @@ class ActivityService:
         goal_summary = payload.get("goal_summary")
         if event_type in PUBLIC_SUBAGENT_EVENT_TYPES and isinstance(goal_summary, str):
             return goal_summary
+        if event_type in PUBLIC_TOOL_EVENT_TYPES and isinstance(fallback_summary, str):
+            return fallback_summary.strip()
 
         if isinstance(fallback_summary, str) and fallback_summary.strip():
             return fallback_summary.strip()

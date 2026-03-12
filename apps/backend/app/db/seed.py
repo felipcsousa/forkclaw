@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from sqlmodel import Session, select
 
@@ -106,6 +107,22 @@ def seed_default_data(session: Session) -> Agent:
             "runtime",
             "heartbeat_interval_seconds",
         ): ("integer", str(settings.default_heartbeat_interval_seconds)),
+        (
+            "runtime",
+            "shell_exec_max_timeout_seconds",
+        ): ("float", f"{settings.shell_exec_max_timeout_seconds:.6f}"),
+        (
+            "runtime",
+            "shell_exec_max_output_chars",
+        ): ("integer", str(settings.shell_exec_max_output_chars)),
+        (
+            "runtime",
+            "shell_exec_allowed_cwd_roots",
+        ): ("json", None),
+        (
+            "runtime",
+            "shell_exec_allowed_env_keys",
+        ): ("json", None),
         ("budget", "daily_usd"): ("float", f"{settings.default_daily_budget_usd:.6f}"),
         ("budget", "monthly_usd"): ("float", f"{settings.default_monthly_budget_usd:.6f}"),
         ("preferences", "default_view"): ("string", settings.default_app_view),
@@ -123,13 +140,28 @@ def seed_default_data(session: Session) -> Agent:
         ).first()
         if existing_setting is None:
             created_settings.add((scope, key))
+            value_json = None
+            if (scope, key) == ("runtime", "shell_exec_allowed_cwd_roots"):
+                allowed_roots = [
+                    str(Path(item).expanduser().resolve())
+                    for item in settings.shell_exec_allowed_cwd_roots
+                ]
+                value_json = json.dumps(
+                    allowed_roots,
+                    ensure_ascii=False,
+                )
+            elif (scope, key) == ("runtime", "shell_exec_allowed_env_keys"):
+                value_json = json.dumps(
+                    list(settings.shell_exec_allowed_env_keys),
+                    ensure_ascii=False,
+                )
             session.add(
                 Setting(
                     scope=scope,
                     key=key,
                     value_type=value_type,
                     value_text=value_text,
-                    value_json=None,
+                    value_json=value_json,
                     status="active",
                 )
             )
