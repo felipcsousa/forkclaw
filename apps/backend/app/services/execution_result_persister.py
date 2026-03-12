@@ -62,6 +62,7 @@ class ExecutionResultPersister:
         result: KernelExecutionResult,
         skill_resolution_payload: dict[str, object],
         assistant_message_text: str | None = None,
+        record_message_completed_event: bool = False,
     ) -> PersistedExecutionArtifacts:
         assistant_message = (
             self.append_assistant_message(
@@ -71,6 +72,14 @@ class ExecutionResultPersister:
             if assistant_message_text
             else None
         )
+        if assistant_message is not None and record_message_completed_event:
+            self.record_message_completed(
+                agent_id=agent_id,
+                session_record=session_record,
+                task=task,
+                task_run=task_run,
+                message=assistant_message,
+            )
         output_json = json.dumps(
             {
                 "kernel_name": result.kernel_name,
@@ -192,6 +201,29 @@ class ExecutionResultPersister:
             summary_text=event_summary,
         )
         return persisted_run
+
+    def record_message_completed(
+        self,
+        *,
+        agent_id: str,
+        session_record: SessionRecord,
+        task: Task,
+        task_run: TaskRun,
+        message: Message,
+    ) -> None:
+        self.repository.record_audit_event(
+            agent_id=agent_id,
+            event_type="message.completed",
+            entity_type="message",
+            entity_id=message.id,
+            payload={
+                "session_id": session_record.id,
+                "task_id": task.id,
+                "task_run_id": task_run.id,
+                "message_id": message.id,
+            },
+            summary_text="Assistant message completed.",
+        )
 
     @staticmethod
     def extract_estimated_cost(result: KernelExecutionResult) -> float | None:
