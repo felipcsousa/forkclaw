@@ -131,6 +131,7 @@ class ApprovalService:
             request=request,
             result=result,
             assistant_message_text=result.output_text,
+            record_message_completed_event=bundle.task.kind == "agent_execution_async",
         )
 
         refreshed_bundle = self.approvals.get_bundle(approval.id)
@@ -179,6 +180,7 @@ class ApprovalService:
                 f"Approval denied for `{bundle.tool_call.tool_name}`. "
                 "The action was not executed."
             ),
+            record_message_completed_event=bundle.task.kind == "agent_execution_async",
         )
         self.tool_repository.record_audit_event(
             agent_id=approval.agent_id,

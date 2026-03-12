@@ -16,6 +16,7 @@ from app.schemas.health import (
     OperationalComponentsHealthResponse,
     OperationalHealthResponse,
 )
+from app.services.execution_worker import LocalExecutionWorker
 from app.services.runtime_monitor import RuntimeComponentProbe, RuntimeComponentSnapshot
 from app.services.scheduler import LocalScheduler
 from app.services.subagent_worker import LocalSubagentWorker
@@ -29,6 +30,7 @@ class RuntimeSupervisor:
         settings: Settings,
         *,
         scheduler_factory: Callable[..., Any] = LocalScheduler,
+        execution_worker_factory: Callable[..., Any] = LocalExecutionWorker,
         subagent_worker_factory: Callable[..., Any] = LocalSubagentWorker,
     ):
         self.settings = settings
@@ -36,11 +38,19 @@ class RuntimeSupervisor:
             name="scheduler",
             poll_interval_seconds=settings.scheduler_poll_interval_seconds,
         )
+        self.execution_worker_probe = RuntimeComponentProbe(
+            name="execution_worker",
+            poll_interval_seconds=settings.execution_worker_poll_interval_seconds,
+        )
         self.subagent_worker_probe = RuntimeComponentProbe(
             name="subagent_worker",
             poll_interval_seconds=settings.subagent_worker_poll_interval_seconds,
         )
         self.scheduler = scheduler_factory(settings, probe=self.scheduler_probe)
+        self.execution_worker = execution_worker_factory(
+            settings,
+            probe=self.execution_worker_probe,
+        )
         self.subagent_worker = subagent_worker_factory(
             settings,
             probe=self.subagent_worker_probe,
@@ -48,10 +58,12 @@ class RuntimeSupervisor:
 
     async def start(self) -> None:
         await self._start_component(self.scheduler, self.scheduler_probe)
+        await self._start_component(self.execution_worker, self.execution_worker_probe)
         await self._start_component(self.subagent_worker, self.subagent_worker_probe)
 
     async def stop(self) -> None:
         await self._stop_component(self.subagent_worker, self.subagent_worker_probe)
+        await self._stop_component(self.execution_worker, self.execution_worker_probe)
         await self._stop_component(self.scheduler, self.scheduler_probe)
 
     def operational_health(self, session: Session) -> OperationalHealthResponse:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from app.models.entities import (
     Agent,
@@ -148,25 +148,36 @@ class AgentExecutionRepository:
         *,
         title: str = "Agent simple execution",
         kind: str = "agent_execution",
+        status: str = "running",
     ) -> Task:
         task = Task(
             agent_id=agent_id,
             session_id=session_id,
             title=title,
             kind=kind,
-            status="running",
+            status=status,
             payload_json=json.dumps(payload, ensure_ascii=False),
         )
         self.session.add(task)
         self.session.flush()
         return task
 
-    def create_task_run(self, task_id: str) -> TaskRun:
+    def create_task_run(
+        self,
+        task_id: str,
+        *,
+        status: str = "running",
+        started_at=None,
+    ) -> TaskRun:
         run = TaskRun(
             task_id=task_id,
-            status="running",
+            status=status,
             attempt=1,
-            started_at=utc_now(),
+            started_at=(
+                started_at
+                if started_at is not None
+                else (None if status == "queued" else utc_now())
+            ),
         )
         self.session.add(run)
         self.session.flush()
@@ -230,6 +241,40 @@ class AgentExecutionRepository:
         self.session.add(task_run)
         self.session.flush()
         return task_run
+
+    def claim_next_queued_execution_run(self) -> tuple[Task, TaskRun] | None:
+        while True:
+            candidate = self.session.exec(
+                select(TaskRun.id, Task.id)
+                .join(Task, Task.id == TaskRun.task_id)
+                .where(
+                    Task.kind == "agent_execution_async",
+                    TaskRun.status == "queued",
+                )
+                .order_by(TaskRun.created_at.asc())
+            ).first()
+            if candidate is None:
+                return None
+
+            task_run_id, task_id = candidate
+            now = utc_now()
+            result = self.session.exec(
+                update(TaskRun)
+                .where(TaskRun.id == task_run_id, TaskRun.status == "queued")
+                .values(status="running", started_at=now, updated_at=now)
+            )
+            if result.rowcount != 1:
+                continue
+
+            task = self.get_task(str(task_id))
+            task_run = self.get_task_run(str(task_run_id))
+            if task is None or task_run is None:
+                return None
+            task.status = "running"
+            task.updated_at = now
+            self.session.add(task)
+            self.session.flush()
+            return task, task_run
 
     def record_audit_event(
         self,

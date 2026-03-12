@@ -23,3 +23,12 @@ class AgentExecutionResponse(BaseModel):
     model_name: str | None
     tools_used: list[str]
     finished_at: datetime | None
+
+
+class AgentExecutionAcceptedResponse(BaseModel):
+    task_id: str
+    task_run_id: str
+    session_id: str
+    user_message_id: str
+    status: str
+    events_url: str

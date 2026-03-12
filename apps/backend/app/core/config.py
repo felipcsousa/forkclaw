@@ -40,6 +40,7 @@ class Settings:
     web_fetch_default_max_chars: int
     bootstrap_token: str | None
     subagent_max_concurrency_per_session: int
+    execution_worker_poll_interval_seconds: float
     subagent_worker_poll_interval_seconds: float
     subagent_run_timeout_seconds: float
     subagent_max_run_timeout_seconds: float
@@ -114,6 +115,9 @@ def _build_settings() -> Settings:
         bootstrap_token=(os.getenv("APP_BOOTSTRAP_TOKEN", "").strip() or None),
         subagent_max_concurrency_per_session=int(
             os.getenv("SUBAGENT_MAX_CONCURRENCY_PER_SESSION", "3")
+        ),
+        execution_worker_poll_interval_seconds=float(
+            os.getenv("EXECUTION_WORKER_POLL_INTERVAL_SECONDS", "0.1")
         ),
         subagent_worker_poll_interval_seconds=float(
             os.getenv("SUBAGENT_WORKER_POLL_INTERVAL_SECONDS", "0.2")
