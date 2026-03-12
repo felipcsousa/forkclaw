@@ -1,5 +1,16 @@
-import type { AgentExecutionResponse, MessageRecord, SubagentSessionRecord } from '../../lib/backend';
-import type { SessionExecutionEvent } from '../../lib/backend/sessionExecutionStream';
+import type {
+  AgentExecutionAcceptedResponse,
+  AgentExecutionResponse,
+  MessageRecord,
+  SubagentSessionRecord,
+} from '../../lib/backend';
+import type {
+  SessionExecutionEvent,
+  SessionExecutionEventApprovalData,
+  SessionExecutionEventRunData,
+  SessionExecutionEventSubagentData,
+  SessionExecutionEventToolData,
+} from '../../lib/backend/sessionExecutionStream';
 
 export type ChatExecutionRunStatus =
   | 'connecting'
@@ -46,6 +57,8 @@ export interface ChatExecutionState {
   runIdByTaskRunId: Record<string, string>;
 }
 
+type RunResponse = Partial<AgentExecutionAcceptedResponse & AgentExecutionResponse>;
+
 export type ChatExecutionAction =
   | {
       type: 'run/optimistic-created';
@@ -58,7 +71,7 @@ export type ChatExecutionAction =
       type: 'run/response-bound';
       sessionId: string;
       localRunId: string;
-      response: Partial<AgentExecutionResponse>;
+      response: RunResponse;
     }
   | {
       type: 'run/event-received';
@@ -78,6 +91,12 @@ export interface ChatTimelineRunItem {
 }
 
 export type ChatTimelineItem = ChatTimelineMessageItem | ChatTimelineRunItem;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
 
 function parseJsonString(value: string | null | undefined) {
   if (!value) {
@@ -126,26 +145,37 @@ function summarizeToolInput(inputJson: string | null | undefined) {
     return '';
   }
 
-  const record =
-    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+  const record = asRecord(parsed);
   if (!record) {
     return truncateSummary(String(parsed));
   }
 
   const summaryParts = Object.entries(record)
     .slice(0, 2)
-    .map(([key, value]) => `${key}=${truncateSummary(typeof value === 'string' ? value : safeStringify(value), 24)}`);
+    .map(
+      ([key, value]) =>
+        `${key}=${truncateSummary(typeof value === 'string' ? value : safeStringify(value), 24)}`,
+    );
   return summaryParts.join(' · ');
 }
 
-function summarizeShellOutput(outputJson: string | null | undefined) {
+function unwrapToolOutput(outputJson: string | null | undefined) {
   const parsed = parseJsonString(outputJson);
-  const record =
-    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+  const record = asRecord(parsed);
+  if (!record) {
+    return null;
+  }
+
+  const nested = asRecord(record.data);
+  return {
+    raw: record,
+    data: nested ?? record,
+  };
+}
+
+function summarizeShellOutput(outputJson: string | null | undefined) {
+  const unwrapped = unwrapToolOutput(outputJson);
+  const record = unwrapped?.data;
   if (!record) {
     return truncateSummary(outputJson || 'No output');
   }
@@ -159,13 +189,13 @@ function summarizeShellOutput(outputJson: string | null | undefined) {
 }
 
 function summarizeToolOutput(toolName: string, outputJson: string | null | undefined) {
-  if (toolName === 'shell' || toolName === 'exec_command') {
+  if (toolName === 'shell_exec') {
     return summarizeShellOutput(outputJson);
   }
 
-  const parsed = parseJsonString(outputJson);
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const record = parsed as Record<string, unknown>;
+  const unwrapped = unwrapToolOutput(outputJson);
+  const record = unwrapped?.data;
+  if (record) {
     for (const candidate of ['summary', 'message', 'text', 'result']) {
       if (typeof record[candidate] === 'string') {
         return truncateSummary(record[candidate] as string, 72);
@@ -173,23 +203,12 @@ function summarizeToolOutput(toolName: string, outputJson: string | null | undef
     }
   }
 
-  return truncateSummary(outputJson || 'No output');
-}
-
-function deriveRunStatus(event: SessionExecutionEvent) {
-  switch (event.event_type) {
-    case 'kernel.execution.awaiting_approval':
-    case 'tool_call.approval_requested':
-      return 'awaiting_approval' as const;
-    case 'kernel.execution.failed':
-    case 'tool_call.failed':
-      return 'failed' as const;
-    case 'kernel.execution.completed':
-    case 'assistant.message.completed':
-      return 'completed' as const;
-    default:
-      return 'running' as const;
+  const raw = unwrapped?.raw;
+  if (raw && typeof raw.text === 'string') {
+    return truncateSummary(raw.text, 72);
   }
+
+  return truncateSummary(outputJson || 'No output');
 }
 
 function calculateDurationMs(startedAt: string | null, finishedAt: string | null) {
@@ -261,10 +280,7 @@ function upsertRun(state: ChatExecutionState, run: ChatExecutionRun) {
   };
 }
 
-function updateRunStep(
-  steps: ChatExecutionStep[],
-  nextStep: ChatExecutionStep,
-) {
+function updateRunStep(steps: ChatExecutionStep[], nextStep: ChatExecutionStep) {
   const existingIndex = steps.findIndex((step) => step.id === nextStep.id);
   if (existingIndex < 0) {
     return [...steps, nextStep].sort((left, right) =>
@@ -280,90 +296,195 @@ function updateRunStep(
   return updated;
 }
 
-function stepFromEvent(event: SessionExecutionEvent): ChatExecutionStep | null {
-  if (event.tool) {
-    const toolName = event.tool.tool_name || 'tool';
-    return {
-      id: event.tool.tool_call_id || event.event_id,
-      eventId: event.event_id,
-      kind: 'tool',
-      eventType: event.event_type,
-      title: toolName,
-      status: event.tool.status || deriveRunStatus(event),
-      createdAt: event.created_at,
-      startedAt: event.tool.started_at || null,
-      finishedAt: event.tool.finished_at || null,
-      durationMs: calculateDurationMs(
-        event.tool.started_at || null,
-        event.tool.finished_at || null,
-      ),
-      summary:
-        summarizeToolOutput(toolName, event.tool.output_json) ||
-        summarizeToolInput(event.tool.input_json) ||
-        truncateSummary(event.event_type),
-      details:
-        safeStringify({
-          input_json: parseJsonString(event.tool.input_json) ?? event.tool.input_json ?? null,
-          output_json: parseJsonString(event.tool.output_json) ?? event.tool.output_json ?? null,
-        }) || null,
-    };
+function deriveRunStatus(event: SessionExecutionEvent): ChatExecutionRunStatus {
+  switch (event.type) {
+    case 'approval.requested':
+      return 'awaiting_approval';
+    case 'tool.failed':
+    case 'execution.failed':
+      return 'failed';
+    case 'execution.completed':
+      return 'completed';
+    case 'message.user.accepted':
+    case 'assistant.run.created':
+    case 'execution.started':
+    case 'tool.started':
+    case 'tool.completed':
+    case 'subagent.spawned':
+    case 'message.completed':
+      return 'running';
   }
+}
 
-  if (event.approval) {
-    return {
-      id: event.approval.approval_id || event.event_id,
-      eventId: event.event_id,
-      kind: 'approval',
-      eventType: event.event_type,
-      title: 'Approval requested',
-      status: event.approval.status || 'pending',
-      createdAt: event.created_at,
-      startedAt: null,
-      finishedAt: null,
-      durationMs: null,
-      summary: truncateSummary(event.approval.reason || 'Awaiting approval'),
-      details: safeStringify(event.approval),
-    };
+function toolStepStatus(eventType: SessionExecutionEvent['type'], tool: SessionExecutionEventToolData) {
+  if (eventType === 'tool.started') {
+    return 'running';
   }
+  if (eventType === 'tool.failed') {
+    return 'failed';
+  }
+  return tool.status || 'completed';
+}
 
-  if (event.subagent) {
-    return {
-      id: event.subagent.child_session_id || event.event_id,
-      eventId: event.event_id,
-      kind: 'subagent',
-      eventType: event.event_type,
-      title: event.subagent.title || 'Subagent',
-      status: event.subagent.status || deriveRunStatus(event),
-      createdAt: event.created_at,
-      startedAt: null,
-      finishedAt: null,
-      durationMs: null,
-      summary: truncateSummary(event.subagent.summary || event.event_type),
-      details: safeStringify(event.subagent),
-    };
-  }
-
-  if (event.event_type === 'assistant.message.completed') {
-    return null;
-  }
+function createToolStep(event: Extract<SessionExecutionEvent, { type: 'tool.started' | 'tool.completed' | 'tool.failed' }>): ChatExecutionStep {
+  const tool = event.data;
+  const toolName = tool.tool_name || 'tool';
+  const summary =
+    event.type === 'tool.failed'
+      ? truncateSummary(tool.error_message || summarizeToolOutput(toolName, tool.output_json) || 'Tool failed')
+      : summarizeToolOutput(toolName, tool.output_json) ||
+        summarizeToolInput(tool.input_json) ||
+        truncateSummary(event.type);
 
   return {
-    id: event.event_id,
-    eventId: event.event_id,
-    kind: 'status',
-    eventType: event.event_type,
-    title: event.event_type,
+    id: tool.tool_call_id || event.id,
+    eventId: event.id,
+    kind: 'tool',
+    eventType: event.type,
+    title: toolName,
+    status: toolStepStatus(event.type, tool),
+    createdAt: event.created_at,
+    startedAt: tool.started_at || null,
+    finishedAt: tool.finished_at || null,
+    durationMs: calculateDurationMs(tool.started_at || null, tool.finished_at || null),
+    summary,
+    details:
+      safeStringify({
+        input_json: parseJsonString(tool.input_json) ?? tool.input_json ?? null,
+        output_json: parseJsonString(tool.output_json) ?? tool.output_json ?? null,
+        output_text: tool.output_text ?? null,
+        error_message: tool.error_message ?? null,
+      }) || null,
+  };
+}
+
+function createApprovalStep(event: Extract<SessionExecutionEvent, { type: 'approval.requested' }>): ChatExecutionStep {
+  const approval = event.data;
+  return {
+    id: approval.approval_id || event.id,
+    eventId: event.id,
+    kind: 'approval',
+    eventType: event.type,
+    title: 'Approval requested',
+    status: approval.status || 'pending',
+    createdAt: event.created_at,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    summary: truncateSummary(approval.reason || approval.requested_action || 'Awaiting approval'),
+    details: safeStringify(approval),
+  };
+}
+
+function createSubagentStep(event: Extract<SessionExecutionEvent, { type: 'subagent.spawned' }>): ChatExecutionStep {
+  const subagent = event.data;
+  return {
+    id: subagent.child_session_id || event.id,
+    eventId: event.id,
+    kind: 'subagent',
+    eventType: event.type,
+    title: 'Subagent',
+    status: subagent.status || 'running',
+    createdAt: event.created_at,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    summary: truncateSummary(subagent.goal_summary || event.type),
+    details: safeStringify(subagent),
+  };
+}
+
+function createStatusStep(
+  event: Extract<SessionExecutionEvent, { type: 'execution.started' | 'execution.completed' | 'execution.failed' }>,
+) {
+  const run = event.data;
+  const title =
+    event.type === 'execution.started'
+      ? 'Execution started'
+      : event.type === 'execution.completed'
+        ? 'Execution completed'
+        : 'Execution failed';
+  const summary =
+    event.type === 'execution.failed'
+      ? truncateSummary(run.error_message || 'Execution ended with an error.')
+      : title;
+
+  return {
+    id: event.id,
+    eventId: event.id,
+    kind: 'status' as const,
+    eventType: event.type,
+    title,
     status: deriveRunStatus(event),
     createdAt: event.created_at,
-    startedAt: event.run?.started_at || null,
-    finishedAt: event.run?.finished_at || null,
-    durationMs: calculateDurationMs(
-      event.run?.started_at || null,
-      event.run?.finished_at || null,
-    ),
-    summary: truncateSummary(event.run?.error_message || event.event_type),
+    startedAt: run.started_at || null,
+    finishedAt: run.finished_at || null,
+    durationMs: calculateDurationMs(run.started_at || null, run.finished_at || null),
+    summary,
     details: safeStringify(event.raw),
   };
+}
+
+function stepFromEvent(event: SessionExecutionEvent): ChatExecutionStep | null {
+  switch (event.type) {
+    case 'tool.started':
+    case 'tool.completed':
+    case 'tool.failed':
+      return createToolStep(event);
+    case 'approval.requested':
+      return createApprovalStep(event);
+    case 'subagent.spawned':
+      return createSubagentStep(event);
+    case 'execution.started':
+    case 'execution.completed':
+    case 'execution.failed':
+      return createStatusStep(event);
+    default:
+      return null;
+  }
+}
+
+function nextRunStatusFromResponse(response: RunResponse, previousStatus: ChatExecutionRunStatus) {
+  if (response.status === 'completed') {
+    return 'completed';
+  }
+  if (response.status === 'failed') {
+    return 'failed';
+  }
+  if (previousStatus === 'connecting' && response.status === 'queued') {
+    return 'connecting';
+  }
+  return 'running';
+}
+
+function runDataFromEvent(event: SessionExecutionEvent): SessionExecutionEventRunData | null {
+  switch (event.type) {
+    case 'execution.started':
+    case 'execution.completed':
+    case 'execution.failed':
+      return event.data;
+    default:
+      return null;
+  }
+}
+
+function toolDataFromEvent(event: SessionExecutionEvent): SessionExecutionEventToolData | null {
+  switch (event.type) {
+    case 'tool.started':
+    case 'tool.completed':
+    case 'tool.failed':
+      return event.data;
+    default:
+      return null;
+  }
+}
+
+function approvalDataFromEvent(event: SessionExecutionEvent): SessionExecutionEventApprovalData | null {
+  return event.type === 'approval.requested' ? event.data : null;
+}
+
+function subagentDataFromEvent(event: SessionExecutionEvent): SessionExecutionEventSubagentData | null {
+  return event.type === 'subagent.spawned' ? event.data : null;
 }
 
 export function createInitialChatExecutionState(): ChatExecutionState {
@@ -415,12 +536,7 @@ export function chatExecutionStateReducer(
         assistantMessageId:
           action.response.assistant_message_id || existingRun.assistantMessageId,
         finalText: action.response.output_text || existingRun.finalText,
-        status:
-          action.response.status === 'completed'
-            ? 'completed'
-            : action.response.status === 'failed'
-              ? 'failed'
-              : 'running',
+        status: nextRunStatusFromResponse(action.response, existingRun.status),
       };
 
       const nextState = upsertRun(state, run);
@@ -437,9 +553,9 @@ export function chatExecutionStateReducer(
         );
         const sessionRunIds = {
           ...nextState.sessionRunIds,
-          [run.sessionId]: (nextState.sessionRunIds[run.sessionId] || []).map((id) =>
-            runIdsToRemove.has(id) ? nextRunId : id,
-          ).filter((id, index, items) => items.indexOf(id) === index),
+          [run.sessionId]: (nextState.sessionRunIds[run.sessionId] || [])
+            .map((id) => (runIdsToRemove.has(id) ? nextRunId : id))
+            .filter((id, index, items) => items.indexOf(id) === index),
         };
         return {
           runsById,
@@ -459,7 +575,7 @@ export function chatExecutionStateReducer(
       const existingRunId = action.event.task_run_id
         ? state.runIdByTaskRunId[action.event.task_run_id]
         : undefined;
-      const runId = existingRunId || action.event.task_run_id || action.event.event_id;
+      const runId = existingRunId || action.event.task_run_id || action.event.id;
       const existingRun =
         state.runsById[runId] ||
         createEmptyRun({
@@ -468,27 +584,46 @@ export function chatExecutionStateReducer(
           sessionId: action.sessionId,
           createdAt: action.event.created_at,
         });
+
+      const runData = runDataFromEvent(action.event);
+      const toolData = toolDataFromEvent(action.event);
+      const approvalData = approvalDataFromEvent(action.event);
+      const nextStatus = deriveRunStatus(action.event);
       const run: ChatExecutionRun = {
         ...existingRun,
         taskRunId: action.event.task_run_id || existingRun.taskRunId,
-        status: deriveRunStatus(action.event),
-        startedAt: action.event.run?.started_at || existingRun.startedAt,
+        status: nextStatus,
+        startedAt:
+          runData?.started_at ||
+          toolData?.started_at ||
+          existingRun.startedAt,
         finishedAt:
-          action.event.run?.finished_at ||
-          (deriveRunStatus(action.event) === 'completed' ||
-          deriveRunStatus(action.event) === 'failed'
+          runData?.finished_at ||
+          toolData?.finished_at ||
+          (nextStatus === 'completed' || nextStatus === 'failed'
             ? action.event.created_at
             : existingRun.finishedAt),
-        errorMessage: action.event.run?.error_message || existingRun.errorMessage,
+        errorMessage:
+          runData?.error_message ||
+          toolData?.error_message ||
+          existingRun.errorMessage,
       };
 
-      if (action.event.assistant_message) {
-        run.assistantMessageId =
-          action.event.assistant_message.assistant_message_id || run.assistantMessageId;
-        run.userMessageId =
-          action.event.assistant_message.user_message_id || run.userMessageId;
-        run.finalText =
-          action.event.assistant_message.content_text || run.finalText;
+      if (action.event.type === 'assistant.run.created') {
+        run.userMessageId = action.event.data.user_message_id || run.userMessageId;
+      }
+      if (action.event.type === 'message.user.accepted') {
+        run.userMessageId = action.event.data.message.id || run.userMessageId;
+      }
+      if (action.event.type === 'message.completed') {
+        run.assistantMessageId = action.event.data.message.id || run.assistantMessageId;
+        run.finalText = action.event.data.message.content_text || run.finalText;
+      }
+      if (approvalData?.status === 'pending') {
+        run.status = 'awaiting_approval';
+      }
+      if (subagentDataFromEvent(action.event)) {
+        run.status = existingRun.status === 'disconnected' ? 'disconnected' : run.status;
       }
 
       const nextStep = stepFromEvent(action.event);

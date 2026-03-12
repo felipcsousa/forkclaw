@@ -8,8 +8,8 @@ import {
   fetchSessionSubagent,
   fetchSessionSubagentMessages,
   fetchSessionSubagents,
-  sendSessionMessage,
-  type AgentExecutionResponse,
+  sendSessionMessageAsync,
+  type AgentExecutionAcceptedResponse,
   type MessageRecord,
   type SessionRecord,
   type SessionMessagesResponse,
@@ -502,25 +502,21 @@ export function useChatController({
         event,
       });
 
-      if (event.event_type.startsWith('subagent.')) {
+      if (event.type.startsWith('subagent.')) {
         void loadSubagents(event.session_id, { silent: true });
       }
 
       const isTerminalEvent =
-        event.event_type === 'assistant.message.completed' ||
-        event.event_type === 'kernel.execution.completed' ||
-        event.event_type === 'kernel.execution.failed';
+        event.type === 'message.completed' ||
+        event.type === 'execution.completed' ||
+        event.type === 'execution.failed';
       if (!isTerminalEvent) {
         return;
       }
 
       void refreshSessionIndexOnly(event.session_id);
 
-      if (
-        event.event_type === 'assistant.message.completed' &&
-        event.assistant_message?.assistant_message_id &&
-        event.assistant_message?.content_text
-      ) {
+      if (event.type === 'message.completed' && event.data.message.content_text) {
         return;
       }
 
@@ -596,10 +592,10 @@ export function useChatController({
       const sent = await runAsyncAction(
         async (): Promise<SessionRecord> => {
           setDraft('');
-          const response = (await sendSessionMessage(
+          const response = (await sendSessionMessageAsync(
             session.id,
             trimmed,
-          )) as Partial<AgentExecutionResponse> | undefined;
+          )) as Partial<AgentExecutionAcceptedResponse> | undefined;
           if (response) {
             dispatchRuns({
               type: 'run/response-bound',

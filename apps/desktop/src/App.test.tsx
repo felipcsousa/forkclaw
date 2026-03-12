@@ -24,7 +24,7 @@ const mockFetchSessionSubagents = vi.fn();
 const mockFetchSessionSubagent = vi.fn();
 const mockFetchSessionSubagentMessages = vi.fn();
 const mockCancelSessionSubagent = vi.fn();
-const mockSendSessionMessage = vi.fn();
+const mockSendSessionMessageAsync = vi.fn();
 const mockFetchAgentConfig = vi.fn();
 const mockUpdateAgentConfig = vi.fn();
 const mockResetAgentConfig = vi.fn();
@@ -411,8 +411,8 @@ vi.mock('./lib/backend', () => ({
     mockFetchSessionSubagentMessages(sessionId, childSessionId),
   cancelSessionSubagent: (sessionId: string, childSessionId: string) =>
     mockCancelSessionSubagent(sessionId, childSessionId),
-  sendSessionMessage: (sessionId: string, content: string) =>
-    mockSendSessionMessage(sessionId, content),
+  sendSessionMessageAsync: (sessionId: string, content: string) =>
+    mockSendSessionMessageAsync(sessionId, content),
   fetchAgentConfig: () => mockFetchAgentConfig(),
   updateAgentConfig: (payload: unknown) => mockUpdateAgentConfig(payload),
   resetAgentConfig: () => mockResetAgentConfig(),
@@ -496,8 +496,8 @@ vi.mock('./lib/backend/sessions', () => ({
     mockFetchSessionSubagentMessages(sessionId, childSessionId),
   fetchSessionSubagents: (sessionId: string) =>
     mockFetchSessionSubagents(sessionId),
-  sendSessionMessage: (sessionId: string, content: string) =>
-    mockSendSessionMessage(sessionId, content),
+  sendSessionMessageAsync: (sessionId: string, content: string) =>
+    mockSendSessionMessageAsync(sessionId, content),
 }));
 
 vi.mock('./lib/backend/tools', () => ({
@@ -662,8 +662,13 @@ describe('App', () => {
           }),
         ],
       });
-    mockSendSessionMessage.mockResolvedValueOnce({
-      status: 'completed',
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
+      task_id: 'task-send-1',
+      task_run_id: 'run-send-1',
+      session_id: session.id,
+      user_message_id: 'message-1',
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-send-1`,
     });
 
     renderApp();
@@ -678,7 +683,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
-      expect(mockSendSessionMessage).toHaveBeenCalledWith('session-1', 'hello kernel'),
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'hello kernel'),
     );
 
     await waitFor(() =>
@@ -694,7 +699,14 @@ describe('App', () => {
 
     mockFetchSessions.mockResolvedValueOnce({ items: [session] });
     mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
-    mockSendSessionMessage.mockResolvedValueOnce({ status: 'completed' });
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
+      task_id: 'task-send-2',
+      task_run_id: 'run-send-2',
+      session_id: session.id,
+      user_message_id: 'message-1',
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-send-2`,
+    });
 
     renderApp();
 
@@ -749,7 +761,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
-      expect(mockSendSessionMessage).toHaveBeenCalledWith('session-1', 'hello kernel'),
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'hello kernel'),
     );
     await waitFor(() => expect(mockFetchSessions).toHaveBeenCalledTimes(1));
 
@@ -788,18 +800,13 @@ describe('App', () => {
           }),
         ],
       });
-    mockSendSessionMessage.mockResolvedValueOnce({
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
       task_id: 'task-live-1',
       task_run_id: 'run-live-1',
       session_id: session.id,
       user_message_id: 'message-user-live-1',
-      assistant_message_id: 'message-assistant-live-1',
-      status: 'running',
-      output_text: '',
-      kernel_name: 'nanobot',
-      model_name: 'product-echo/simple',
-      tools_used: [],
-      finished_at: null,
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-live-1`,
     });
 
     renderApp();
@@ -817,7 +824,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
-      expect(mockSendSessionMessage).toHaveBeenCalledWith(
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith(
         'session-1',
         'Run the workspace checks.',
       ),
@@ -828,44 +835,49 @@ describe('App', () => {
 
     await act(async () => {
       emitSessionExecutionEvent({
-        event_id: 'evt-tool-live-1',
-        event_type: 'tool_call.completed',
+        id: 'evt-tool-live-1',
+        type: 'tool.completed',
         session_id: session.id,
         task_run_id: 'run-live-1',
         created_at: '2026-03-08T12:02:01Z',
-        tool: {
+        task_id: 'task-live-1',
+        data: {
           tool_call_id: 'call-shell-live-1',
-          tool_name: 'shell',
+          tool_name: 'shell_exec',
           status: 'completed',
           started_at: '2026-03-08T12:02:00Z',
           finished_at: '2026-03-08T12:02:01Z',
-          input_json: '{"cmd":"npm test"}',
+          input_json: '{"command":"npm test"}',
           output_json:
-            '{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":""}',
+            '{"text":"Shell command finished with exit code 0 in 1000 ms.","data":{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":"","duration_ms":1000,"cwd_resolved":"/workspace","truncated":false}}',
         },
         raw: {},
-      });
+      } as SessionExecutionEvent);
     });
 
     await waitFor(() =>
       expect(screen.getByText('Exit 0 · PASS src/app.test.ts')).toBeInTheDocument(),
     );
-    expect(screen.getByText('shell')).toBeInTheDocument();
+    expect(screen.getByText('shell_exec')).toBeInTheDocument();
 
     await act(async () => {
       emitSessionExecutionEvent({
-        event_id: 'evt-message-live-1',
-        event_type: 'assistant.message.completed',
+        id: 'evt-message-live-1',
+        type: 'message.completed',
         session_id: session.id,
         task_run_id: 'run-live-1',
         created_at: '2026-03-08T12:02:02Z',
-        assistant_message: {
-          assistant_message_id: 'message-assistant-live-1',
-          user_message_id: 'message-user-live-1',
-          content_text: 'Workspace checks finished successfully.',
+        task_id: 'task-live-1',
+        data: {
+          message: {
+            id: 'message-assistant-live-1',
+            role: 'assistant',
+            content_text: 'Workspace checks finished successfully.',
+            sequence_number: 2,
+          },
         },
         raw: {},
-      });
+      } as SessionExecutionEvent);
     });
 
     await waitFor(() =>

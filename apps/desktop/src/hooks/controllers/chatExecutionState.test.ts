@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MessageRecord } from '../../lib/backend';
+import type { SessionExecutionEvent } from '../../lib/backend/sessionExecutionStream';
 import {
   buildChatTimelineItems,
   chatExecutionStateReducer,
@@ -18,8 +19,12 @@ const baseMessage: MessageRecord = {
   updated_at: '2026-03-12T13:00:00Z',
 };
 
+function executionEvent(payload: Record<string, unknown>) {
+  return payload as unknown as SessionExecutionEvent;
+}
+
 describe('chatExecutionStateReducer', () => {
-  it('tracks a run by task_run_id from optimistic start through final assistant message', () => {
+  it('tracks a run by task_run_id using canonical backend events', () => {
     let state = createInitialChatExecutionState();
 
     state = chatExecutionStateReducer(state, {
@@ -36,42 +41,77 @@ describe('chatExecutionStateReducer', () => {
       response: {
         task_run_id: 'run-1',
         user_message_id: 'message-1',
+        status: 'queued',
       },
     });
     state = chatExecutionStateReducer(state, {
       type: 'run/event-received',
       sessionId: 'session-1',
-      event: {
-        event_id: 'evt-tool-1',
-        event_type: 'tool_call.requested',
+      event: executionEvent({
+        id: 'evt-created-1',
+        type: 'assistant.run.created',
         session_id: 'session-1',
         task_run_id: 'run-1',
         created_at: '2026-03-12T13:00:01Z',
-        raw: {},
-        tool: {
-          tool_call_id: 'call-1',
-          tool_name: 'read_file',
-          status: 'running',
-          input_json: '{"path":"README.md"}',
+        data: {
+          user_message_id: 'message-1',
+          status: 'queued',
         },
-      },
+      }),
     });
     state = chatExecutionStateReducer(state, {
       type: 'run/event-received',
       sessionId: 'session-1',
-      event: {
-        event_id: 'evt-finished-1',
-        event_type: 'assistant.message.completed',
+      event: executionEvent({
+        id: 'evt-tool-1',
+        type: 'tool.started',
         session_id: 'session-1',
         task_run_id: 'run-1',
         created_at: '2026-03-12T13:00:02Z',
-        raw: {},
-        assistant_message: {
-          assistant_message_id: 'message-2',
-          user_message_id: 'message-1',
-          content_text: 'Workspace checks finished successfully.',
+        data: {
+          tool_call_id: 'call-1',
+          tool_name: 'read_file',
+          status: 'started',
+          input_json: '{"path":"README.md"}',
+          started_at: '2026-03-12T13:00:02Z',
+          finished_at: null,
         },
-      },
+      }),
+    });
+    state = chatExecutionStateReducer(state, {
+      type: 'run/event-received',
+      sessionId: 'session-1',
+      event: executionEvent({
+        id: 'evt-finished-1',
+        type: 'message.completed',
+        session_id: 'session-1',
+        task_run_id: 'run-1',
+        created_at: '2026-03-12T13:00:03Z',
+        data: {
+          message: {
+            id: 'message-2',
+            role: 'assistant',
+            content_text: 'Workspace checks finished successfully.',
+            sequence_number: 2,
+          },
+        },
+      }),
+    });
+    state = chatExecutionStateReducer(state, {
+      type: 'run/event-received',
+      sessionId: 'session-1',
+      event: executionEvent({
+        id: 'evt-completed-1',
+        type: 'execution.completed',
+        session_id: 'session-1',
+        task_run_id: 'run-1',
+        created_at: '2026-03-12T13:00:04Z',
+        data: {
+          status: 'completed',
+          started_at: '2026-03-12T13:00:01Z',
+          finished_at: '2026-03-12T13:00:04Z',
+        },
+      }),
     });
 
     const run = state.runsById['run-1'];
@@ -80,44 +120,45 @@ describe('chatExecutionStateReducer', () => {
     expect(run?.assistantMessageId).toBe('message-2');
     expect(run?.status).toBe('completed');
     expect(run?.finalText).toBe('Workspace checks finished successfully.');
-    expect(run?.steps).toEqual([
-      expect.objectContaining({
-        id: 'call-1',
-        kind: 'tool',
-        title: 'read_file',
-        status: 'running',
-      }),
-    ]);
+    expect(run?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'call-1',
+          kind: 'tool',
+          title: 'read_file',
+          status: 'running',
+        }),
+      ]),
+    );
   });
 
-  it('summarizes shell output without exposing stdout or stderr by default', () => {
+  it('summarizes shell_exec output without exposing stdout or stderr by default', () => {
     const state = chatExecutionStateReducer(createInitialChatExecutionState(), {
       type: 'run/event-received',
       sessionId: 'session-1',
-      event: {
-        event_id: 'evt-shell-1',
-        event_type: 'tool_call.completed',
+      event: executionEvent({
+        id: 'evt-shell-1',
+        type: 'tool.completed',
         session_id: 'session-1',
         task_run_id: 'run-shell-1',
         created_at: '2026-03-12T13:10:00Z',
-        raw: {},
-        tool: {
+        data: {
           tool_call_id: 'call-shell-1',
-          tool_name: 'shell',
+          tool_name: 'shell_exec',
           status: 'completed',
           started_at: '2026-03-12T13:09:58Z',
           finished_at: '2026-03-12T13:10:00Z',
-          input_json: '{"cmd":"npm test"}',
+          input_json: '{"command":"npm test"}',
           output_json:
-            '{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":""}',
+            '{"text":"Shell command finished with exit code 0 in 2000 ms.","data":{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":"","duration_ms":2000,"cwd_resolved":"/workspace","truncated":false}}',
         },
-      },
+      }),
     });
 
     const run = state.runsById['run-shell-1'];
     expect(run?.steps).toEqual([
       expect.objectContaining({
-        title: 'shell',
+        title: 'shell_exec',
         status: 'completed',
         durationMs: 2000,
         summary: 'Exit 0 · PASS src/app.test.ts',
@@ -129,22 +170,34 @@ describe('chatExecutionStateReducer', () => {
 
 describe('buildChatTimelineItems', () => {
   it('inserts runs after the triggering user message and hides duplicate persisted assistant messages', () => {
-    const state = chatExecutionStateReducer(createInitialChatExecutionState(), {
+    let state = chatExecutionStateReducer(createInitialChatExecutionState(), {
+      type: 'run/response-bound',
+      sessionId: 'session-1',
+      localRunId: 'optimistic:1',
+      response: {
+        task_run_id: 'run-1',
+        user_message_id: 'message-1',
+        status: 'queued',
+      },
+    });
+    state = chatExecutionStateReducer(state, {
       type: 'run/event-received',
       sessionId: 'session-1',
-      event: {
-        event_id: 'evt-final-1',
-        event_type: 'assistant.message.completed',
+      event: executionEvent({
+        id: 'evt-final-1',
+        type: 'message.completed',
         session_id: 'session-1',
         task_run_id: 'run-1',
         created_at: '2026-03-12T13:00:02Z',
-        raw: {},
-        assistant_message: {
-          assistant_message_id: 'message-2',
-          user_message_id: 'message-1',
-          content_text: 'Workspace checks finished successfully.',
+        data: {
+          message: {
+            id: 'message-2',
+            role: 'assistant',
+            content_text: 'Workspace checks finished successfully.',
+            sequence_number: 2,
+          },
         },
-      },
+      }),
     });
 
     const items = buildChatTimelineItems({

@@ -1,6 +1,22 @@
 import { resolveBackendConnectionInfo } from '../desktopRuntime';
 
-export interface SessionExecutionEventToolPayload {
+export interface SessionExecutionEventMessagePayload {
+  id: string;
+  role: string;
+  content_text: string;
+  sequence_number: number;
+}
+
+export interface SessionExecutionEventMessageUserAcceptedData {
+  message: SessionExecutionEventMessagePayload;
+}
+
+export interface SessionExecutionEventAssistantRunCreatedData {
+  user_message_id?: string | null;
+  status?: string | null;
+}
+
+export interface SessionExecutionEventToolData {
   tool_call_id?: string | null;
   tool_name?: string | null;
   status?: string | null;
@@ -8,48 +24,66 @@ export interface SessionExecutionEventToolPayload {
   output_json?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  output_text?: string | null;
+  error_message?: string | null;
 }
 
-export interface SessionExecutionEventApprovalPayload {
+export interface SessionExecutionEventApprovalData {
   approval_id?: string | null;
-  status?: string | null;
+  tool_call_id?: string | null;
+  tool_name?: string | null;
+  requested_action?: string | null;
   reason?: string | null;
+  status?: string | null;
 }
 
-export interface SessionExecutionEventSubagentPayload {
+export interface SessionExecutionEventSubagentData {
+  parent_session_id?: string | null;
   child_session_id?: string | null;
-  title?: string | null;
   status?: string | null;
-  summary?: string | null;
+  goal_summary?: string | null;
 }
 
-export interface SessionExecutionEventAssistantMessagePayload {
-  assistant_message_id?: string | null;
-  user_message_id?: string | null;
-  content_text?: string | null;
-  status?: string | null;
+export interface SessionExecutionEventMessageCompletedData {
+  message: SessionExecutionEventMessagePayload;
 }
 
-export interface SessionExecutionEventRunPayload {
+export interface SessionExecutionEventRunData {
   status?: string | null;
   error_message?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
 }
 
-export interface SessionExecutionEvent {
-  event_id: string;
-  event_type: string;
+interface SessionExecutionEventBase<TType extends string, TData> {
+  id: string;
+  type: TType;
   session_id: string;
+  task_id: string | null;
   task_run_id: string | null;
   created_at: string;
-  run?: SessionExecutionEventRunPayload;
-  tool?: SessionExecutionEventToolPayload;
-  approval?: SessionExecutionEventApprovalPayload;
-  subagent?: SessionExecutionEventSubagentPayload;
-  assistant_message?: SessionExecutionEventAssistantMessagePayload;
+  data: TData;
   raw: Record<string, unknown>;
 }
+
+export type SessionExecutionEvent =
+  | SessionExecutionEventBase<
+      'message.user.accepted',
+      SessionExecutionEventMessageUserAcceptedData
+    >
+  | SessionExecutionEventBase<
+      'assistant.run.created',
+      SessionExecutionEventAssistantRunCreatedData
+    >
+  | SessionExecutionEventBase<'tool.started', SessionExecutionEventToolData>
+  | SessionExecutionEventBase<'tool.completed', SessionExecutionEventToolData>
+  | SessionExecutionEventBase<'tool.failed', SessionExecutionEventToolData>
+  | SessionExecutionEventBase<'approval.requested', SessionExecutionEventApprovalData>
+  | SessionExecutionEventBase<'subagent.spawned', SessionExecutionEventSubagentData>
+  | SessionExecutionEventBase<'message.completed', SessionExecutionEventMessageCompletedData>
+  | SessionExecutionEventBase<'execution.started', SessionExecutionEventRunData>
+  | SessionExecutionEventBase<'execution.completed', SessionExecutionEventRunData>
+  | SessionExecutionEventBase<'execution.failed', SessionExecutionEventRunData>;
 
 export interface SessionExecutionStreamOptions {
   sessionId: string;
@@ -64,10 +98,30 @@ export interface SessionExecutionStreamConnection {
   close: () => void;
 }
 
+const SESSION_EXECUTION_EVENT_TYPES = [
+  'message.user.accepted',
+  'assistant.run.created',
+  'tool.started',
+  'tool.completed',
+  'tool.failed',
+  'approval.requested',
+  'subagent.spawned',
+  'message.completed',
+  'execution.started',
+  'execution.completed',
+  'execution.failed',
+] as const satisfies readonly SessionExecutionEvent['type'][];
+
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 5_000;
 
-function buildEventFrame(block: string) {
+type EventFrame = {
+  eventId: string;
+  eventName: string;
+  data: string;
+};
+
+function buildEventFrame(block: string): EventFrame | null {
   const lines = block.split(/\r?\n/);
   const dataLines: string[] = [];
   let eventName = 'message';
@@ -118,9 +172,11 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function normalizeSessionExecutionEvent(
-  frame: { eventId: string; eventName: string; data: string },
-): SessionExecutionEvent | null {
+function isSessionExecutionEventType(value: string): value is SessionExecutionEvent['type'] {
+  return (SESSION_EXECUTION_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+function normalizeSessionExecutionEvent(frame: EventFrame): SessionExecutionEvent | null {
   let parsed: unknown;
 
   try {
@@ -134,34 +190,33 @@ function normalizeSessionExecutionEvent(
     return null;
   }
 
-  const rawEventId = asString(record.event_id) || frame.eventId || crypto.randomUUID();
-  const rawEventType = asString(record.event_type) || frame.eventName;
+  const id = asString(record.id) || frame.eventId || crypto.randomUUID();
+  const type = asString(record.type) || frame.eventName;
   const sessionId = asString(record.session_id);
   const createdAt = asString(record.created_at) || new Date().toISOString();
+  const data = asRecord(record.data);
 
-  if (!sessionId || !rawEventType) {
+  if (!id || !type || !sessionId || !data || !isSessionExecutionEventType(type)) {
     return null;
   }
 
   return {
-    event_id: rawEventId,
-    event_type: rawEventType,
+    id,
+    type,
     session_id: sessionId,
+    task_id: asString(record.task_id),
     task_run_id: asString(record.task_run_id),
     created_at: createdAt,
-    run: asRecord(record.run) || undefined,
-    tool: asRecord(record.tool) || undefined,
-    approval: asRecord(record.approval) || undefined,
-    subagent: asRecord(record.subagent) || undefined,
-    assistant_message: asRecord(record.assistant_message) || undefined,
+    data,
     raw: record,
-  };
+  } as SessionExecutionEvent;
 }
 
 async function consumeEventStream(
   response: Response,
   options: SessionExecutionStreamOptions,
   isClosed: () => boolean,
+  handleEvent: (event: SessionExecutionEvent) => void,
 ) {
   if (!response.ok) {
     throw new Error(`Stream request failed with status ${response.status}.`);
@@ -193,7 +248,7 @@ async function consumeEventStream(
       }
       const event = normalizeSessionExecutionEvent(frame);
       if (event) {
-        options.onEvent(event);
+        handleEvent(event);
       }
     }
   }
@@ -205,6 +260,8 @@ export function connectSessionExecutionStream(
   let closed = false;
   let reconnectAttempt = 0;
   let activeAbortController: AbortController | null = null;
+  let lastEventId: string | null = null;
+  const seenEventIds = new Set<string>();
 
   const isClosed = () => closed;
 
@@ -219,9 +276,12 @@ export function connectSessionExecutionStream(
         if (connection.bootstrapToken) {
           headers.set('X-Backend-Bootstrap-Token', connection.bootstrapToken);
         }
+        if (lastEventId) {
+          headers.set('Last-Event-ID', lastEventId);
+        }
 
         const response = await fetch(
-          `${connection.baseUrl}/sessions/${encodeURIComponent(options.sessionId)}/events/stream`,
+          `${connection.baseUrl}/sessions/${encodeURIComponent(options.sessionId)}/events`,
           {
             method: 'GET',
             headers,
@@ -230,7 +290,14 @@ export function connectSessionExecutionStream(
         );
 
         reconnectAttempt = 0;
-        await consumeEventStream(response, options, isClosed);
+        await consumeEventStream(response, options, isClosed, (event) => {
+          lastEventId = event.id;
+          if (seenEventIds.has(event.id)) {
+            return;
+          }
+          seenEventIds.add(event.id);
+          options.onEvent(event);
+        });
         if (!closed) {
           options.onDisconnect?.();
         }

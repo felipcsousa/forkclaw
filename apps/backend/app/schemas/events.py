@@ -40,6 +40,10 @@ class ToolEventData(BaseModel):
     tool_call_id: str
     tool_name: str
     status: str
+    input_json: str | None = None
+    output_json: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     output_text: str | None = None
     error_message: str | None = None
 
@@ -67,6 +71,8 @@ class MessageCompletedData(BaseModel):
 class ExecutionStateData(BaseModel):
     status: str
     error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class ExecutionEventEnvelope(BaseModel):

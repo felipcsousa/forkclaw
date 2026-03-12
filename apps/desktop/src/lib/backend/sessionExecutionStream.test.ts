@@ -42,15 +42,15 @@ describe('connectSessionExecutionStream', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('opens the session SSE endpoint with the bootstrap token and parses typed events', async () => {
+  it('opens the canonical SSE endpoint and parses canonical event envelopes', async () => {
     const events: SessionExecutionEvent[] = [];
 
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(
         createEventStreamBody([
           'id: evt-1\n',
-          'event: tool_call.completed\n',
-          'data: {"session_id":"session-1","task_run_id":"run-1","created_at":"2026-03-12T13:00:00Z","tool":{"tool_name":"shell","status":"completed"}}\n\n',
+          'event: tool.completed\n',
+          'data: {"id":"evt-1","type":"tool.completed","session_id":"session-1","task_run_id":"run-1","created_at":"2026-03-12T13:00:00Z","data":{"tool_call_id":"call-1","tool_name":"shell_exec","status":"completed","input_json":"{\\"command\\":\\"pwd\\"}","output_json":"{\\"exit_code\\":0}","started_at":"2026-03-12T12:59:58Z","finished_at":"2026-03-12T13:00:00Z"}}\n\n',
         ]),
         {
           status: 200,
@@ -72,7 +72,7 @@ describe('connectSessionExecutionStream', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/sessions/session-1/events/stream',
+      'http://127.0.0.1:8000/sessions/session-1/events',
       expect.objectContaining({
         headers: expect.any(Headers),
         method: 'GET',
@@ -84,28 +84,50 @@ describe('connectSessionExecutionStream', () => {
     expect(headers.get('X-Backend-Bootstrap-Token')).toBe('bootstrap-token');
     expect(events).toEqual([
       expect.objectContaining({
-        event_id: 'evt-1',
-        event_type: 'tool_call.completed',
+        id: 'evt-1',
+        type: 'tool.completed',
         session_id: 'session-1',
         task_run_id: 'run-1',
+        data: expect.objectContaining({
+          tool_name: 'shell_exec',
+          status: 'completed',
+        }),
       }),
     ]);
 
     connection.close();
   });
 
-  it('signals reconnect attempts after a transient fetch failure', async () => {
+  it('reconnects with Last-Event-ID and suppresses replayed events', async () => {
     const reconnects: number[] = [];
     const events: SessionExecutionEvent[] = [];
 
     globalThis.fetch = vi
       .fn()
-      .mockRejectedValueOnce(new Error('socket closed'))
       .mockResolvedValueOnce(
         new Response(
           createEventStreamBody([
-            'event: kernel.execution.completed\n',
-            'data: {"event_id":"evt-2","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:01Z"}\n\n',
+            'id: evt-1\n',
+            'event: execution.started\n',
+            'data: {"id":"evt-1","type":"execution.started","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:01Z","data":{"status":"running","started_at":"2026-03-12T13:00:01Z","finished_at":null}}\n\n',
+          ]),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/event-stream',
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          createEventStreamBody([
+            'id: evt-1\n',
+            'event: execution.started\n',
+            'data: {"id":"evt-1","type":"execution.started","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:01Z","data":{"status":"running","started_at":"2026-03-12T13:00:01Z","finished_at":null}}\n\n',
+            'id: evt-2\n',
+            'event: execution.completed\n',
+            'data: {"id":"evt-2","type":"execution.completed","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:02Z","data":{"status":"completed","started_at":"2026-03-12T13:00:01Z","finished_at":"2026-03-12T13:00:02Z"}}\n\n',
           ]),
           {
             status: 200,
@@ -120,7 +142,9 @@ describe('connectSessionExecutionStream', () => {
       sessionId: 'session-1',
       onEvent: (event) => {
         events.push(event);
-        connection.close();
+        if (events.length === 2) {
+          connection.close();
+        }
       },
       onReconnect: (attempt) => {
         reconnects.push(attempt);
@@ -131,9 +155,16 @@ describe('connectSessionExecutionStream', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(reconnects).toEqual([1]);
+    const secondHeaders = (vi.mocked(globalThis.fetch).mock.calls[1]?.[1]?.headers ??
+      new Headers()) as Headers;
+    expect(secondHeaders.get('Last-Event-ID')).toBe('evt-1');
     expect(events).toEqual([
       expect.objectContaining({
-        event_id: 'evt-2',
+        id: 'evt-1',
+        task_run_id: 'run-2',
+      }),
+      expect.objectContaining({
+        id: 'evt-2',
         task_run_id: 'run-2',
       }),
     ]);

@@ -57,6 +57,7 @@ class ExecutionEventService:
         task_runs = list(self._list_task_runs(session_id=session_id, task_run_id=task_run_id))
         task_run_ids = {item.id for item, _task in task_runs}
         task_by_run_id = {item.id: task for item, task in task_runs}
+        task_run_by_id = {item.id: item for item, _task in task_runs}
 
         tool_calls = list(self._list_tool_calls(task_run_ids))
         tool_calls_by_id = {item.id: item for item in tool_calls}
@@ -74,6 +75,7 @@ class ExecutionEventService:
                 session_id=session_id,
                 task_run_id=task_run_id,
                 task_by_run_id=task_by_run_id,
+                task_run_by_id=task_run_by_id,
                 messages_by_id=messages_by_id,
             )
             if projected is not None:
@@ -95,6 +97,8 @@ class ExecutionEventService:
                         tool_call_id=tool_call.id,
                         tool_name=tool_call.tool_name,
                         status="started",
+                        input_json=tool_call.input_json,
+                        started_at=tool_call.started_at or tool_call.created_at,
                     ),
                 )
             )
@@ -112,6 +116,10 @@ class ExecutionEventService:
                             tool_call_id=tool_call.id,
                             tool_name=tool_call.tool_name,
                             status="completed",
+                            input_json=tool_call.input_json,
+                            output_json=tool_call.output_json,
+                            started_at=tool_call.started_at,
+                            finished_at=tool_call.finished_at,
                             output_text=output_text,
                         ),
                     )
@@ -129,6 +137,10 @@ class ExecutionEventService:
                             tool_call_id=tool_call.id,
                             tool_name=tool_call.tool_name,
                             status="failed",
+                            input_json=tool_call.input_json,
+                            output_json=tool_call.output_json,
+                            started_at=tool_call.started_at,
+                            finished_at=tool_call.finished_at,
                             error_message=self._tool_error_message(tool_call),
                         ),
                     )
@@ -187,6 +199,7 @@ class ExecutionEventService:
         session_id: str,
         task_run_id: str | None,
         task_by_run_id: dict[str, Task],
+        task_run_by_id: dict[str, TaskRun],
         messages_by_id: dict[str, Message],
     ) -> ExecutionEventEnvelope | None:
         public_type = PUBLIC_AUDIT_EVENT_TYPES.get(audit_event.event_type)
@@ -236,11 +249,29 @@ class ExecutionEventService:
                 goal_summary=str(payload.get("goal_summary") or "") or None,
             )
         else:
+            task_run = (
+                task_run_by_id.get(resolved_task_run_id)
+                if isinstance(resolved_task_run_id, str)
+                else None
+            )
+            started_at = task_run.started_at if task_run is not None else None
+            finished_at = task_run.finished_at if task_run is not None else None
+            error_message = str(payload.get("error") or payload.get("error_message") or "") or None
+            if error_message is None and task_run is not None:
+                error_message = task_run.error_message
+            if public_type == "execution.started" and started_at is None:
+                started_at = audit_event.created_at
+            if public_type == "execution.started":
+                finished_at = None
+            if public_type in {"execution.completed", "execution.failed"} and finished_at is None:
+                finished_at = audit_event.created_at
             data = ExecutionStateData(
                 status="completed" if public_type == "execution.completed" else (
                     "failed" if public_type == "execution.failed" else "running"
                 ),
-                error_message=str(payload.get("error") or "") or None,
+                error_message=error_message,
+                started_at=started_at,
+                finished_at=finished_at,
             )
 
         return ExecutionEventEnvelope(

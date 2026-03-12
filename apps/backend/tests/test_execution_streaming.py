@@ -130,6 +130,79 @@ def test_async_stream_includes_tool_events(test_client: TestClient) -> None:
     assert tool_call.status == "completed"
 
 
+def test_async_stream_includes_shell_exec_payload_and_execution_timestamps(
+    test_client: TestClient,
+) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Async Shell"})
+    assert create_session_response.status_code == 201
+    session_id = create_session_response.json()["id"]
+
+    permission_response = test_client.put(
+        "/tools/permissions/shell_exec",
+        json={"permission_level": "allow"},
+    )
+    assert permission_response.status_code == 200
+
+    start_response = test_client.post(
+        f"/sessions/{session_id}/messages/async",
+        json={"content": "tool:shell_exec command='echo hello' cwd=."},
+    )
+    assert start_response.status_code == 202
+    payload = start_response.json()
+
+    events = _parse_sse_events(
+        test_client,
+        payload["events_url"],
+        expected_terminal="execution.completed",
+    )
+
+    assert [event["type"] for event in events] == [
+        "message.user.accepted",
+        "assistant.run.created",
+        "execution.started",
+        "tool.started",
+        "tool.completed",
+        "message.completed",
+        "execution.completed",
+    ]
+
+    execution_started = next(event for event in events if event["type"] == "execution.started")
+    tool_started = next(event for event in events if event["type"] == "tool.started")
+    tool_completed = next(event for event in events if event["type"] == "tool.completed")
+    execution_completed = next(event for event in events if event["type"] == "execution.completed")
+
+    assert execution_started["data"]["status"] == "running"
+    assert execution_started["data"]["started_at"]
+    assert execution_started["data"]["finished_at"] is None
+
+    assert tool_started["data"]["tool_name"] == "shell_exec"
+    assert tool_started["data"]["status"] == "started"
+    assert tool_started["data"]["started_at"]
+    assert tool_started["data"]["finished_at"] is None
+    assert json.loads(tool_started["data"]["input_json"]) == {
+        "command": "echo hello",
+        "cwd": ".",
+    }
+
+    completed_output = json.loads(tool_completed["data"]["output_json"])
+    assert tool_completed["data"]["tool_name"] == "shell_exec"
+    assert tool_completed["data"]["status"] == "completed"
+    assert tool_completed["data"]["started_at"]
+    assert tool_completed["data"]["finished_at"]
+    assert "Shell command finished with exit code 0" in tool_completed["data"]["output_text"]
+    assert completed_output["text"].startswith("Shell command finished with exit code 0")
+    assert completed_output["data"]["stdout"] == "hello\n"
+    assert completed_output["data"]["stderr"] == ""
+    assert completed_output["data"]["exit_code"] == 0
+    assert isinstance(completed_output["data"]["duration_ms"], int)
+    assert completed_output["data"]["cwd_resolved"]
+    assert completed_output["data"]["truncated"] is False
+
+    assert execution_completed["data"]["status"] == "completed"
+    assert execution_completed["data"]["started_at"]
+    assert execution_completed["data"]["finished_at"]
+
+
 def test_async_stream_includes_approval_requested_event(test_client: TestClient) -> None:
     create_session_response = test_client.post("/sessions", json={"title": "Async Approval"})
     assert create_session_response.status_code == 201
@@ -204,3 +277,41 @@ def test_async_stream_reports_failed_execution(test_client: TestClient) -> None:
 
     task_run = _wait_for_task_run(payload["task_run_id"], status="failed")
     assert task_run.error_message
+
+
+def test_async_stream_reports_shell_timeout_failure(test_client: TestClient) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Async Shell Timeout"})
+    assert create_session_response.status_code == 201
+    session_id = create_session_response.json()["id"]
+
+    permission_response = test_client.put(
+        "/tools/permissions/shell_exec",
+        json={"permission_level": "allow"},
+    )
+    assert permission_response.status_code == 200
+
+    start_response = test_client.post(
+        f"/sessions/{session_id}/messages/async",
+        json={"content": "tool:shell_exec command='sleep 2' cwd=. timeout_seconds=1"},
+    )
+    assert start_response.status_code == 202
+    payload = start_response.json()
+
+    events = _parse_sse_events(
+        test_client,
+        payload["events_url"],
+        expected_terminal="execution.failed",
+    )
+
+    event_types = [event["type"] for event in events]
+    assert "tool.started" in event_types
+    assert "tool.failed" in event_types
+    assert event_types[-1] == "execution.failed"
+
+    failed_event = next(event for event in events if event["type"] == "tool.failed")
+    assert failed_event["data"]["tool_name"] == "shell_exec"
+    assert "timed out" in failed_event["data"]["error_message"]
+
+    execution_failed = events[-1]
+    assert execution_failed["data"]["status"] == "failed"
+    assert "timed out" in execution_failed["data"]["error_message"]

@@ -132,6 +132,15 @@ export interface AgentExecutionResponse {
   finished_at: string | null;
 }
 
+export interface AgentExecutionAcceptedResponse {
+  task_id: string;
+  task_run_id: string;
+  session_id: string;
+  user_message_id: string;
+  status: string;
+  events_url: string;
+}
+
 export interface AgentProfileRecord {
   id: string;
   display_name: string;
@@ -850,4 +859,17 @@ export function sendSessionMessage(
   return sendJson<AgentExecutionResponse>('POST', `/sessions/${sessionId}/messages`, {
     content,
   });
+}
+
+export function sendSessionMessageAsync(
+  sessionId: string,
+  content: string,
+): Promise<AgentExecutionAcceptedResponse> {
+  return sendJson<AgentExecutionAcceptedResponse>(
+    'POST',
+    `/sessions/${sessionId}/messages/async`,
+    {
+      content,
+    },
+  );
 }

@@ -1,4 +1,5 @@
 export type {
+  AgentExecutionAcceptedResponse,
   ActivityAuditEventRecord,
   ActivityTimelineEntryRecord,
   ActivityTimelineEntryType,
@@ -58,11 +59,14 @@ export type {
 } from './legacy';
 export type {
   SessionExecutionEvent,
-  SessionExecutionEventApprovalPayload,
-  SessionExecutionEventAssistantMessagePayload,
-  SessionExecutionEventRunPayload,
-  SessionExecutionEventSubagentPayload,
-  SessionExecutionEventToolPayload,
+  SessionExecutionEventApprovalData,
+  SessionExecutionEventAssistantRunCreatedData,
+  SessionExecutionEventMessageCompletedData,
+  SessionExecutionEventMessagePayload,
+  SessionExecutionEventMessageUserAcceptedData,
+  SessionExecutionEventRunData,
+  SessionExecutionEventSubagentData,
+  SessionExecutionEventToolData,
   SessionExecutionStreamConnection,
   SessionExecutionStreamOptions,
 } from './sessionExecutionStream';
