@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -279,6 +279,128 @@ class Memory(TimestampedModel, table=True):
     value_text: str = Field(sa_column=Column(Text, nullable=False))
     source: str = Field(default="manual", sa_column=Column(String(100), nullable=False))
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
+
+
+class MemoryEntry(TimestampedModel, table=True):
+    __tablename__ = "memory_entries"
+
+    __table_args__ = (Index("ix_memory_entries_scope_type_scope_key", "scope_type", "scope_key"),)
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    scope_type: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    scope_key: str = Field(sa_column=Column(String(255), nullable=False))
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True, index=True),
+    )
+    session_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(36), nullable=True, index=True),
+    )
+    parent_session_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(36), nullable=True, index=True),
+    )
+    source_kind: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    lifecycle_state: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    title: str = Field(sa_column=Column(String(200), nullable=False))
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    importance: float = Field(default=0.5, sa_column=Column(Float, nullable=False))
+    confidence: float = Field(default=0.5, sa_column=Column(Float, nullable=False))
+    dedupe_hash: str = Field(sa_column=Column(String(64), nullable=False, index=True))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    updated_by: str = Field(sa_column=Column(String(100), nullable=False))
+    expires_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    redaction_state: str = Field(default="clean", sa_column=Column(String(20), nullable=False))
+    security_state: str = Field(default="safe", sa_column=Column(String(20), nullable=False))
+    hidden_from_recall: bool = Field(default=False, nullable=False, index=True)
+    deleted_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+
+
+class MemoryRelation(SQLModel, table=True):
+    __tablename__ = "memory_relations"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    from_memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    to_memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    relation_kind: str = Field(sa_column=Column(String(100), nullable=False))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class MemoryRecallLog(SQLModel, table=True):
+    __tablename__ = "memory_recall_log"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    scope_type: str = Field(sa_column=Column(String(50), nullable=False))
+    scope_key: str = Field(sa_column=Column(String(255), nullable=False))
+    conversation_id: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    session_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True))
+    run_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True))
+    recall_reason: str = Field(sa_column=Column(String(100), nullable=False))
+    decision: str = Field(sa_column=Column(String(50), nullable=False))
+    rank: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class SessionSummary(SQLModel, table=True):
+    __tablename__ = "session_summaries"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    scope_key: str = Field(sa_column=Column(String(255), nullable=False, index=True))
+    session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    conversation_id: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    task_run_id: str | None = Field(
+        default=None,
+        foreign_key="task_runs.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    source_kind: str = Field(sa_column=Column(String(50), nullable=False))
+    summary_text: str = Field(sa_column=Column(Text, nullable=False))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class MemoryChangeLog(SQLModel, table=True):
+    __tablename__ = "memory_change_log"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    action: str = Field(sa_column=Column(String(100), nullable=False))
+    actor_type: str = Field(sa_column=Column(String(50), nullable=False))
+    actor_id: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    before_snapshot: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    after_snapshot: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
 
 
 class Document(TimestampedModel, table=True):

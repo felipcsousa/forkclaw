@@ -7,6 +7,7 @@ from app.api.routes.cron_jobs import router as cron_jobs_router
 from app.api.routes.execution import router as execution_router
 from app.api.routes.health import router as health_router
 from app.api.routes.internal import router as internal_router
+from app.api.routes.memory import router as memory_router
 from app.api.routes.sessions import router as sessions_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.skills import router as skills_router
@@ -19,6 +20,7 @@ api_router.include_router(agent_router)
 api_router.include_router(execution_router)
 api_router.include_router(health_router)
 api_router.include_router(internal_router)
+api_router.include_router(memory_router)
 api_router.include_router(skills_router)
 api_router.include_router(cron_jobs_router)
 api_router.include_router(sessions_router)

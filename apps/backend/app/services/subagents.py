@@ -10,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
 from app.core.config import get_settings
-from app.models.entities import ensure_utc, utc_now
+from app.models.entities import SessionSubagentRun, ensure_utc, utc_now
 from app.repositories.subagents import SubagentRepository
 from app.schemas.session import (
     SessionSubagentsListResponse,
@@ -23,6 +23,7 @@ from app.schemas.session import (
     SubagentTimelineEventRead,
 )
 from app.services.agent_execution import AgentExecutionService
+from app.services.memory_capture_service import MemoryCaptureService
 from app.services.subagent_completion import SubagentCompletionSummaryBuilder
 from app.services.subagent_tool_scoping import resolve_subagent_tool_scope
 
@@ -61,6 +62,7 @@ class SubagentDelegationService:
         self.session = session
         self.repository = SubagentRepository(session)
         self.execution_service = AgentExecutionService(session)
+        self.memory_capture = MemoryCaptureService(session)
         self.summary_builder = SubagentCompletionSummaryBuilder()
 
     def spawn(
@@ -241,6 +243,7 @@ class SubagentDelegationService:
                     terminal_event_summary="Subagent cancelled before execution.",
                 )
             )
+            self._commit_action(lambda: self._capture_terminal_memory(updated_run))
             return SubagentCancelResponse(
                 parent_session_id=parent.id,
                 child_session_id=child.id,
@@ -302,9 +305,7 @@ class SubagentDelegationService:
                 "cancelled" if run.cancellation_requested_at is not None else "timed_out"
             )
             error_code = (
-                "subagent_cancelled"
-                if terminal_status == "cancelled"
-                else "subagent_timed_out"
+                "subagent_cancelled" if terminal_status == "cancelled" else "subagent_timed_out"
             )
             error_summary = (
                 "Subagent execution was cancelled after exceeding its timeout window."
@@ -321,7 +322,7 @@ class SubagentDelegationService:
                 error_summary=error_summary,
             )
             parent_payload = json.loads(summary.output_json)
-            self._run_with_sqlite_retry(
+            finalized_run = self._run_with_sqlite_retry(
                 lambda: self._finalize_run_immediate(
                     run_id=run.id,
                     status=terminal_status,
@@ -345,14 +346,13 @@ class SubagentDelegationService:
                             parent_payload.get("estimated_cost_usd")
                         ),
                         extra={
-                            "summary": str(
-                                parent_payload.get("summary") or summary.summary_text
-                            )
+                            "summary": str(parent_payload.get("summary") or summary.summary_text)
                         },
                     ),
                     terminal_event_summary=summary.summary_text,
                 )
             )
+            self._commit_action(lambda: self._capture_terminal_memory(finalized_run))
             cleaned += 1
         return cleaned
 
@@ -494,6 +494,7 @@ class SubagentDelegationService:
                 terminal_event_summary=summary.summary_text,
             )
         )
+        self._commit_action(lambda: self._capture_terminal_memory(finalized_run))
         return finalized_run.lifecycle_status in KNOWN_SUBAGENT_STATUSES
 
     def aggregate_counts_for_sessions(
@@ -502,8 +503,7 @@ class SubagentDelegationService:
     ) -> dict[str, SubagentCountsRead]:
         raw_counts = self.repository.aggregate_counts_by_launcher_session(session_ids)
         return {
-            session_id: SubagentCountsRead(**counts)
-            for session_id, counts in raw_counts.items()
+            session_id: SubagentCountsRead(**counts) for session_id, counts in raw_counts.items()
         }
 
     def ensure_main_session_interaction_allowed(self, session_id: str) -> None:
@@ -697,6 +697,20 @@ class SubagentDelegationService:
             excerpt = " ".join(message.content_text.split())[:180]
             lines.append(f"- {message.role}: {excerpt}")
         return "\n".join(lines)
+
+    def _capture_terminal_memory(self, run: SessionSubagentRun) -> None:
+        child = self.repository.get_session(run.child_session_id)
+        if child is None:
+            return
+        output_text = run.final_summary or run.error_summary or ""
+        if not output_text.strip():
+            return
+        task_run = self.repository.get_task_run(run.task_run_id)
+        self.memory_capture.capture_execution_result(
+            session_record=child,
+            task_run=task_run,
+            output_text=output_text,
+        )
 
     @staticmethod
     def _build_context_snapshot(*, explicit_context: str | None, parent_snapshot: str) -> str:
