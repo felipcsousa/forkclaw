@@ -38,6 +38,7 @@ class MemoryCaptureService:
 
         identity = build_conversation_identity(
             session_id=session_record.id,
+            conversation_id=session_record.conversation_id,
             run_id=task_run.id if task_run is not None else None,
             parent_session_id=session_record.parent_session_id,
         )
@@ -62,14 +63,24 @@ class MemoryCaptureService:
                 level="warning",
             )
             summary = SessionSummary(
+                agent_id=session_record.agent_id,
                 scope_key=identity.session_key,
                 session_id=session_record.id,
+                root_session_id=session_record.root_session_id or session_record.id,
                 conversation_id=identity.conversation_id,
                 parent_session_id=session_record.parent_session_id,
                 task_run_id=task_run.id if task_run is not None else None,
                 source_kind="summary",
                 summary_text=summary_text,
+                importance=0.0,
                 created_by="system",
+                workspace_path=None,
+                user_scope_key="local-user",
+                hidden_from_recall=False,
+                deleted_at=None,
+                origin_message_id=None,
+                origin_task_run_id=task_run.id if task_run is not None else None,
+                override_target_summary_id=None,
             )
             self.repository.add_session_summary(summary)
             return None
@@ -79,22 +90,34 @@ class MemoryCaptureService:
             return existing
 
         summary = SessionSummary(
+            agent_id=session_record.agent_id,
             scope_key=identity.session_key,
             session_id=session_record.id,
+            root_session_id=session_record.root_session_id or session_record.id,
             conversation_id=identity.conversation_id,
             parent_session_id=session_record.parent_session_id,
             task_run_id=task_run.id if task_run is not None else None,
             source_kind="summary",
             summary_text=summary_text,
+            importance=0.0,
             created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=task_run.id if task_run is not None else None,
+            override_target_summary_id=None,
         )
         self.repository.add_session_summary(summary)
 
         entry = MemoryEntry(
+            agent_id=session_record.agent_id,
             scope_type="episodic",
             scope_key=identity.session_key,
             conversation_id=identity.conversation_id,
             session_id=session_record.id,
+            root_session_id=session_record.root_session_id or session_record.id,
             parent_session_id=session_record.parent_session_id,
             source_kind="autosaved",
             lifecycle_state="active",
@@ -106,11 +129,16 @@ class MemoryCaptureService:
             dedupe_hash=dedupe_hash,
             created_by="system",
             updated_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
             expires_at=None,
             redaction_state=inspected.redaction_state,
             security_state=inspected.security_state,
             hidden_from_recall=False,
             deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=task_run.id if task_run is not None else None,
+            override_target_entry_id=None,
         )
         created = self.repository.add_entry(entry)
         self.repository.add_change_log(

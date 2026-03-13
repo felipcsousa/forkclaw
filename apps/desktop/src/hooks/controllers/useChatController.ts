@@ -17,8 +17,6 @@ import {
   type SubagentSessionRecord,
 } from '../../lib/backend/sessions';
 import {
-  connectSessionExecutionStream,
-  type SessionExecutionEvent,
   fetchMemoryRecallDetail,
   fetchSessionRecallSummaries,
   type MemoryRecallDetailRecord,

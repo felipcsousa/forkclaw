@@ -93,6 +93,13 @@ class MemorySearchService:
         self.repository.create_recall_logs(
             [
                 {
+                    "memory_id": item.id,
+                    "scope_type": item.origin.scope_type or "session_summary",
+                    "scope_key": item.origin.scope_key or item.id,
+                    "session_id": context.session_id,
+                    "recall_reason": "explicit_search",
+                    "decision": "preview",
+                    "rank": index,
                     "query_text": normalized_query,
                     "run_id": run_id,
                     "record_type": item.record_type,
@@ -110,7 +117,7 @@ class MemorySearchService:
                     "source_kind": item.source_kind,
                     "override_status": item.override.status,
                 }
-                for item in items
+                for index, item in enumerate(items)
             ]
         )
         return MemoryRecallPreviewResponse(
@@ -163,14 +170,16 @@ class MemorySearchService:
             [
                 item.id
                 for item in candidates
-                if item.record_type == "memory_entry" and item.source_kind == "automatic"
+                if item.record_type == "memory_entry"
+                and item.source_kind in {"automatic", "autosaved"}
             ]
         )
         session_summary_overrides = self.repository.list_session_summary_overrides(
             [
                 item.id
                 for item in candidates
-                if item.record_type == "session_summary" and item.source_kind == "automatic"
+                if item.record_type == "session_summary"
+                and item.source_kind in {"automatic", "summary"}
             ]
         )
 
@@ -202,11 +211,14 @@ class MemorySearchService:
                 continue
 
             override_row = None
-            if candidate.record_type == "memory_entry" and candidate.source_kind == "automatic":
+            if candidate.record_type == "memory_entry" and candidate.source_kind in {
+                "automatic",
+                "autosaved",
+            }:
                 override_row = memory_overrides.get(candidate.id)
             elif (
                 candidate.record_type == "session_summary"
-                and candidate.source_kind == "automatic"
+                and candidate.source_kind in {"automatic", "summary"}
             ):
                 override_row = session_summary_overrides.get(candidate.id)
 

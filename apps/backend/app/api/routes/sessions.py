@@ -43,9 +43,7 @@ def list_sessions(
         else {}
     )
     items = [
-        SessionRead.model_validate(
-            {**item.model_dump(), "subagent_counts": counts.get(item.id)}
-        )
+        SessionRead.model_validate({**item.model_dump(), "subagent_counts": counts.get(item.id)})
         for item in records
     ]
     return SessionsListResponse(items=items)
@@ -238,9 +236,14 @@ async def stream_session_events(
                     return
             if not replay_complete_sent:
                 replay_complete_sent = True
+                ready_payload = {
+                    "type": "stream.ready",
+                    "session_id": session_id,
+                    "data": {"phase": "live"},
+                }
                 yield (
                     "event: stream.ready\n"
-                    f"data: {json.dumps({'type': 'stream.ready', 'session_id': session_id, 'data': {'phase': 'live'}}, ensure_ascii=False)}\n\n"
+                    f"data: {json.dumps(ready_payload, ensure_ascii=False)}\n\n"
                 )
             if await request.is_disconnected():
                 break

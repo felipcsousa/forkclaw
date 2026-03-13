@@ -509,14 +509,18 @@ class MemoryRecallLog(TimestampedModel, table=True):
         nullable=True,
         index=True,
     )
-    memory_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True, index=True))
+    memory_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
     scope_type: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     scope_key: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     conversation_id: str | None = Field(
         default=None,
         sa_column=Column(String(100), nullable=True, index=True),
     )
-    session_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True, index=True))
+    session_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
     run_id: str | None = Field(
         default=None,
         sa_column=Column(String(100), nullable=True, index=True),
@@ -528,7 +532,9 @@ class MemoryRecallLog(TimestampedModel, table=True):
         default=None,
         sa_column=Column(String(50), nullable=True, index=True),
     )
-    record_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True, index=True))
+    record_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
     query_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     score: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     reason_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
@@ -551,6 +557,8 @@ class MemoryChangeLog(SQLModel, table=True):
         default_factory=utc_now,
         sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
     )
+
+
 class Document(TimestampedModel, table=True):
     __tablename__ = "documents"
 

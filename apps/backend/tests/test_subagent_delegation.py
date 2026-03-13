@@ -18,10 +18,11 @@ from app.core.secrets import clear_secret_store_cache
 from app.db.seed import seed_default_data
 from app.db.session import clear_engine_cache, get_db_session
 from app.models.entities import (
-    Memory,
+    MemoryEntry,
     Message,
     SessionRecord,
     SessionSubagentRun,
+    Setting,
     ToolPermission,
     utc_now,
 )
@@ -42,6 +43,16 @@ def _wait_for(predicate, *, timeout: float = 3.0, interval: float = 0.1):
             return value
         time.sleep(interval)
     return predicate()
+
+
+def _set_feature_flag(key: str, enabled: bool) -> None:
+    with get_db_session() as session:
+        setting = session.exec(
+            select(Setting).where(Setting.scope == "features", Setting.key == key)
+        ).one()
+        setting.value_text = "true" if enabled else "false"
+        session.add(setting)
+        session.commit()
 
 
 def _alembic_config() -> Config:
@@ -273,6 +284,7 @@ def test_spawned_subagent_is_processed_to_completion_and_posts_parent_summary(
 def test_subagent_uses_only_current_parent_conversation_snapshot_and_writes_scoped_memory(
     test_client: TestClient,
 ) -> None:
+    _set_feature_flag("memory_v1_enabled", True)
     parent_response = test_client.post("/sessions", json={"title": "Scoped Parent"})
     assert parent_response.status_code == 201
     parent_id = parent_response.json()["id"]
@@ -316,9 +328,9 @@ def test_subagent_uses_only_current_parent_conversation_snapshot_and_writes_scop
         child = session.exec(select(SessionRecord).where(SessionRecord.id == child_id)).one()
         episodic_memories = list(
             session.exec(
-                select(Memory).where(
-                    Memory.session_id == child_id,
-                    Memory.memory_class == "episodic",
+                select(MemoryEntry).where(
+                    MemoryEntry.session_id == child_id,
+                    MemoryEntry.scope_type == "episodic",
                 )
             )
         )

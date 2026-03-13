@@ -201,10 +201,24 @@ class MemorySearchRepository:
         if not items:
             return
         now = utc_now()
-        for item in items:
+        for index, item in enumerate(items):
             row = MemoryRecallLog(
+                memory_id=str(item.get("memory_id") or item["record_id"]),
+                scope_type=str(item.get("scope_type") or item["record_type"]),
+                scope_key=str(item.get("scope_key") or item["record_id"]),
+                conversation_id=(
+                    str(item["conversation_id"])
+                    if isinstance(item.get("conversation_id"), str)
+                    else None
+                ),
+                session_id=(
+                    str(item["session_id"]) if isinstance(item.get("session_id"), str) else None
+                ),
                 query_text=item["query_text"],
                 run_id=item.get("run_id"),
+                recall_reason=str(item.get("recall_reason") or "explicit_search"),
+                decision=str(item.get("decision") or "preview"),
+                rank=int(item.get("rank") or index),
                 record_type=item["record_type"],
                 record_id=item["record_id"],
                 score=item["score"],

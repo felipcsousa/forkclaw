@@ -47,6 +47,19 @@ const mockCreateCronJob = vi.fn();
 const mockPauseCronJob = vi.fn();
 const mockActivateCronJob = vi.fn();
 const mockDeleteCronJob = vi.fn();
+const mockFetchMemoryItems = vi.fn();
+const mockFetchMemoryItem = vi.fn();
+const mockFetchMemoryItemHistory = vi.fn();
+const mockCreateMemoryItem = vi.fn();
+const mockUpdateMemoryItem = vi.fn();
+const mockHideMemoryItem = vi.fn();
+const mockRestoreMemoryItem = vi.fn();
+const mockPromoteMemoryItem = vi.fn();
+const mockDemoteMemoryItem = vi.fn();
+const mockDeleteMemoryItem = vi.fn();
+const mockFetchMemoryRecallLog = vi.fn();
+const mockFetchMemoryRecallDetail = vi.fn();
+const mockFetchSessionRecallSummaries = vi.fn();
 const mockConnectSessionExecutionStream = vi.fn();
 const defaultMatchMedia = window.matchMedia;
 const providerLabelMap: Record<string, string> = {
@@ -470,6 +483,27 @@ vi.mock('./lib/backend/jobs', () => ({
   pauseCronJob: (jobId: string) => mockPauseCronJob(jobId),
 }));
 
+vi.mock('./lib/backend/memory', () => ({
+  fetchMemoryItems: (filters?: unknown) => mockFetchMemoryItems(filters),
+  fetchMemoryItem: (memoryId: string) => mockFetchMemoryItem(memoryId),
+  fetchMemoryItemHistory: (memoryId: string) =>
+    mockFetchMemoryItemHistory(memoryId),
+  createMemoryItem: (payload: unknown) => mockCreateMemoryItem(payload),
+  updateMemoryItem: (memoryId: string, payload: unknown) =>
+    mockUpdateMemoryItem(memoryId, payload),
+  hideMemoryItem: (memoryId: string) => mockHideMemoryItem(memoryId),
+  restoreMemoryItem: (memoryId: string) => mockRestoreMemoryItem(memoryId),
+  promoteMemoryItem: (memoryId: string) => mockPromoteMemoryItem(memoryId),
+  demoteMemoryItem: (memoryId: string) => mockDemoteMemoryItem(memoryId),
+  deleteMemoryItem: (memoryId: string, hard?: boolean) =>
+    mockDeleteMemoryItem(memoryId, hard),
+  fetchMemoryRecallLog: () => mockFetchMemoryRecallLog(),
+  fetchMemoryRecallDetail: (messageId: string) =>
+    mockFetchMemoryRecallDetail(messageId),
+  fetchSessionRecallSummaries: (sessionId: string) =>
+    mockFetchSessionRecallSummaries(sessionId),
+}));
+
 vi.mock('./lib/backend/settings', () => ({
   fetchOperationalSettings: () => mockFetchOperationalSettings(),
   getOperationalProviderLabel: (provider: string) =>
@@ -626,6 +660,19 @@ describe('App', () => {
       history: [],
       heartbeat: defaultHeartbeat,
     });
+    mockFetchMemoryItems.mockResolvedValue({ items: [] });
+    mockFetchMemoryItem.mockResolvedValue(null);
+    mockFetchMemoryItemHistory.mockResolvedValue({ items: [] });
+    mockCreateMemoryItem.mockResolvedValue(null);
+    mockUpdateMemoryItem.mockResolvedValue(null);
+    mockHideMemoryItem.mockResolvedValue(null);
+    mockRestoreMemoryItem.mockResolvedValue(null);
+    mockPromoteMemoryItem.mockResolvedValue(null);
+    mockDemoteMemoryItem.mockResolvedValue(null);
+    mockDeleteMemoryItem.mockResolvedValue(null);
+    mockFetchMemoryRecallLog.mockResolvedValue({ items: [] });
+    mockFetchMemoryRecallDetail.mockResolvedValue(null);
+    mockFetchSessionRecallSummaries.mockResolvedValue({ items: [] });
   });
 
   afterEach(() => {
@@ -2108,6 +2155,26 @@ describe('App', () => {
 
     await waitFor(() =>
       expect(screen.getByText(/List Files Coach/i)).toBeInTheDocument(),
+    );
+  });
+
+  it('exposes Memory Studio from the desktop navigation', async () => {
+    mockFetchSessions.mockResolvedValueOnce({ items: [makeSession()] });
+    mockFetchSessionMessages.mockResolvedValueOnce({
+      session: makeSession(),
+      items: [],
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-sidebar-nav-memory')).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId('app-sidebar-nav-memory'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Memory Studio' })).toBeInTheDocument(),
     );
   });
 });

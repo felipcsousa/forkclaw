@@ -48,7 +48,12 @@ describe('ChatTimeline', () => {
     render(
       <ChatTimeline
         session={makeSession() as never}
-        messages={[makeMessage() as never]}
+        timelineItems={[
+          {
+            kind: 'message',
+            message: makeMessage(),
+          } as never,
+        ]}
         recallSummaries={[
           {
             assistant_message_id: 'message-2',
@@ -59,6 +64,9 @@ describe('ChatTimeline', () => {
           },
         ]}
         subagents={[]}
+        executionStreamStatus="idle"
+        executionStreamReconnectAttempt={0}
+        executionStreamErrorMessage={null}
         isLoading={false}
         isSending={false}
         cancellingSubagentId={null}

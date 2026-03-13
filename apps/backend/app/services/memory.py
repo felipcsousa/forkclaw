@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +13,7 @@ from app.models.entities import (
     MemoryEntry,
     MemoryRecallLog,
     SessionSummary,
+    ensure_utc,
     utc_now,
 )
 from app.repositories.memory import MemoryRepository
@@ -33,7 +33,6 @@ from app.schemas.memory import (
 from app.services.memory_admin_service import MemoryAdminService
 from app.services.memory_search_service import MemorySearchService
 
-TOKEN_PATTERN = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
 USER_SCOPE_KEY = "local-user"
 USER_MANAGED_SOURCE_KINDS = {
     "manual",
@@ -175,7 +174,11 @@ class MemoryService:
     def restore_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
         if entry is not None:
-            return self._read_entry(self.admin.restore(memory_id))
+            if entry.deleted_at is not None or entry.lifecycle_state == "soft_deleted":
+                entry = self.admin.restore(memory_id)
+            if entry.hidden_from_recall:
+                entry = self.admin.unhide(memory_id)
+            return self._read_entry(entry)
 
         summary = self._require_summary(memory_id)
         summary.hidden_from_recall = False
@@ -259,8 +262,12 @@ class MemoryService:
         for item in response.items:
             title = item.title or item.summary or item.body or "Memory"
             scope = self._scope_label_from_key(item.origin.scope_key)
-            kind = "session_summary" if item.record_type == "session_summary" else self._kind_from_scope_type(
-                item.origin.scope_type,
+            kind = (
+                "session_summary"
+                if item.record_type == "session_summary"
+                else self._kind_from_scope_type(
+                    item.origin.scope_type,
+                )
             )
             source_label = self._source_label(
                 item.source_kind,
@@ -336,6 +343,7 @@ class MemoryService:
         if not isinstance(items, list) or not items:
             return
 
+        message = self._require_message(assistant_message_id)
         reason_summary = payload.get("reason_summary") if isinstance(payload, dict) else None
         for index, item in enumerate(items):
             if not isinstance(item, dict):
@@ -343,10 +351,28 @@ class MemoryService:
             kind = str(item.get("kind") or "stable")
             record_type = "session_summary" if kind == "session_summary" else "memory_entry"
             memory_id = str(item.get("memory_id") or "")
+            if not memory_id:
+                continue
+            try:
+                resolved_item = self.get_item(memory_id)
+            except ValueError:
+                resolved_item = None
+            scope_type = (
+                "session_summary"
+                if resolved_item is not None and resolved_item.kind == "session_summary"
+                else (resolved_item.kind if resolved_item is not None else kind)
+            )
+            scope_key = (
+                resolved_item.scope
+                if resolved_item is not None
+                else (str(item.get("scope") or "") or message.session_id)
+            )
             row = MemoryRecallLog(
                 assistant_message_id=assistant_message_id,
-                memory_id=memory_id if record_type == "memory_entry" else None,
-                scope_key=str(item.get("scope") or "") or None,
+                memory_id=memory_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                conversation_id=message.conversation_id,
                 session_id=session_id,
                 run_id=task_run_id,
                 recall_reason="runtime_context",
@@ -365,16 +391,14 @@ class MemoryService:
                 reason_summary=str(reason_summary) if isinstance(reason_summary, str) else None,
                 source_kind=str(item.get("source_kind") or "") or None,
                 override_status=(
-                    "overrides_automatic"
-                    if bool(item.get("original_memory_id"))
-                    else "none"
+                    "overrides_automatic" if bool(item.get("original_memory_id")) else "none"
                 ),
             )
             self.session.add(row)
         self.session.commit()
 
     def recall_for_message(self, assistant_message_id: str) -> MemoryRecallDetailRead:
-        message = self.session.get(type(self._require_message(assistant_message_id)), assistant_message_id)
+        message = self._require_message(assistant_message_id)
         rows = self._recall_rows_for_message(assistant_message_id)
         if not rows:
             return MemoryRecallDetailRead(
@@ -553,7 +577,9 @@ class MemoryService:
     ) -> MemoryItemRead:
         override = SessionSummary(
             agent_id=summary.agent_id,
-            scope_key=payload.scope and self._scope_key_from_label(payload.scope) or summary.scope_key,
+            scope_key=payload.scope
+            and self._scope_key_from_label(payload.scope)
+            or summary.scope_key,
             session_id=summary.session_id,
             root_session_id=summary.root_session_id,
             conversation_id=summary.conversation_id,
@@ -678,7 +704,9 @@ class MemoryService:
                 grouped[row.assistant_message_id] = []
                 order.append(row.assistant_message_id)
             grouped[row.assistant_message_id].append(row)
-        return [(assistant_message_id, grouped[assistant_message_id]) for assistant_message_id in order]
+        return [
+            (assistant_message_id, grouped[assistant_message_id]) for assistant_message_id in order
+        ]
 
     def _recall_item_read(self, row: MemoryRecallLog) -> MemoryRecallItemRead:
         item = self.get_item(row.record_id or row.memory_id or "")
@@ -691,7 +719,9 @@ class MemoryService:
             source_kind=item.source_kind,
             source_label=item.source_label,
             importance=item.importance,
-            reason=str(reason_payload.get("reason") or row.recall_reason or "Matched runtime context."),
+            reason=str(
+                reason_payload.get("reason") or row.recall_reason or "Matched runtime context."
+            ),
             origin_session_id=(
                 reason_payload.get("origin_session_id")
                 if isinstance(reason_payload.get("origin_session_id"), str)
@@ -707,9 +737,11 @@ class MemoryService:
     def _recall_reason(self, item) -> str:  # noqa: ANN001
         matched_scopes = ", ".join(item.origin.matched_scopes) or "default scopes"
         lexical = item.score_breakdown.get("lexical")
+        preview_source = item.body or item.summary or item.title or "memory context"
+        preview = " ".join(str(preview_source).split())[:72]
         if isinstance(lexical, (int, float)):
-            return f"Matched {matched_scopes}; lexical score {lexical:.2f}."
-        return f"Matched {matched_scopes}."
+            return f"Matched {matched_scopes}; lexical score {lexical:.2f}; context: {preview}"
+        return f"Matched {matched_scopes}; context: {preview}"
 
     def _require_default_agent(self) -> Agent:
         statement = select(Agent).where(Agent.is_default.is_(True)).order_by(Agent.created_at.asc())
@@ -765,6 +797,7 @@ class MemoryService:
             return "Manual override"
         return {
             "manual": "Manual",
+            "automatic": "Session capture",
             "autosaved": "Session capture",
             "summary": "Conversation summary",
             "promoted_from_session": "Promoted",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlmodel import select
 
 from app.db.session import get_db_session
-from app.models.entities import Agent, Memory, SessionRecord
+from app.models.entities import Agent, MemoryEntry, Message, SessionRecord, SessionSummary, utc_now
 from app.services.prompt_context_service import PromptContextService
 
 
@@ -25,34 +25,34 @@ def _seed_session(agent_id: str, *, title: str = "Memory Session") -> SessionRec
         return record
 
 
-def _memory(
+def _entry(
     *,
     agent_id: str,
-    namespace: str,
-    memory_key: str,
-    value_text: str,
-    source: str,
-    memory_class: str = "stable",
-    scope_kind: str = "agent",
-    scope_ref: str | None = None,
-    session_id: str | None = None,
-    conversation_id: str | None = None,
-    parent_session_id: str | None = None,
-    status: str = "active",
-) -> Memory:
-    return Memory(
+    title: str,
+    body: str,
+    scope_key: str = "user/preferences",
+    scope_type: str = "stable",
+    source_kind: str = "manual",
+    hidden_from_recall: bool = False,
+    deleted: bool = False,
+) -> MemoryEntry:
+    return MemoryEntry(
         agent_id=agent_id,
-        namespace=namespace,
-        memory_key=memory_key,
-        value_text=value_text,
-        source=source,
-        memory_class=memory_class,
-        scope_kind=scope_kind,
-        scope_ref=scope_ref,
-        session_id=session_id,
-        conversation_id=conversation_id,
-        parent_session_id=parent_session_id,
-        status=status,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        source_kind=source_kind,
+        lifecycle_state="active",
+        title=title,
+        body=body,
+        summary=body[:80],
+        importance=0.5,
+        confidence=1.0,
+        dedupe_hash=f"dedupe-{title}-{source_kind}",
+        created_by="user" if source_kind != "autosaved" else "system",
+        updated_by="user" if source_kind != "autosaved" else "system",
+        user_scope_key="local-user",
+        hidden_from_recall=hidden_from_recall,
+        deleted_at=utc_now() if deleted else None,
     )
 
 
@@ -65,47 +65,41 @@ def test_prompt_context_prioritizes_manual_and_user_override_over_automatic_memo
         session_record = _seed_session(agent.id)
         session.add_all(
             [
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="reply-style",
-                    value_text="Manual reply style",
-                    source="manual",
+                    title="reply-style",
+                    body="Manual reply style",
+                    source_kind="manual",
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="reply-style",
-                    value_text="Override reply style",
-                    source="user_override",
+                    title="reply-style",
+                    body="Override reply style",
+                    source_kind="user_override",
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="reply-style",
-                    value_text="Promoted reply style",
-                    source="promoted",
+                    title="reply-style",
+                    body="Promoted reply style",
+                    source_kind="promoted_from_session",
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="reply-style",
-                    value_text="Autosaved reply style",
-                    source="autosaved",
+                    title="reply-style",
+                    body="Autosaved reply style",
+                    source_kind="autosaved",
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="timezone",
-                    value_text="Override timezone",
-                    source="user_override",
+                    title="timezone",
+                    body="Override timezone",
+                    source_kind="user_override",
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="timezone",
-                    value_text="Autosaved timezone",
-                    source="autosaved",
+                    title="timezone",
+                    body="Autosaved timezone",
+                    source_kind="autosaved",
                 ),
             ]
         )
@@ -135,21 +129,17 @@ def test_prompt_context_never_includes_hidden_or_deleted_memories(test_client) -
         session_record = _seed_session(agent.id, title="Visibility Session")
         session.add_all(
             [
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="favorite-color",
-                    value_text="green",
-                    source="manual",
-                    status="hidden",
+                    title="favorite-color",
+                    body="green",
+                    hidden_from_recall=True,
                 ),
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="preferences",
-                    memory_key="favorite-food",
-                    value_text="pizza",
-                    source="manual",
-                    status="deleted",
+                    title="favorite-food",
+                    body="pizza",
+                    deleted=True,
                 ),
             ]
         )
@@ -177,12 +167,10 @@ def test_prompt_context_applies_fixed_layer_budgets_and_truncates_last_entry(tes
         session_record = _seed_session(agent.id, title="Budget Session")
         session.add_all(
             [
-                _memory(
+                _entry(
                     agent_id=agent.id,
-                    namespace="notes",
-                    memory_key=f"manual-{index}",
-                    value_text=("M" * 950) + str(index),
-                    source="manual",
+                    title=f"manual-{index}",
+                    body=("M" * 950) + str(index),
                 )
                 for index in range(3)
             ]
@@ -200,3 +188,49 @@ def test_prompt_context_applies_fixed_layer_budgets_and_truncates_last_entry(tes
     assert manual_layer.used_chars <= manual_layer.budget_chars == 2000
     assert manual_layer.content.endswith("...")
     assert any(item.reason == "budget" for item in resolved.excluded)
+
+
+def test_update_conversation_summary_persists_current_conversation_summary(test_client) -> None:
+    del test_client
+    with get_db_session() as session:
+        agent = session.exec(select(Agent)).one()
+        agent_id = agent.id
+        session_record = _seed_session(agent.id, title="Summary Session")
+        session.add_all(
+            [
+                Message(
+                    session_id=session_record.id,
+                    conversation_id=session_record.conversation_id,
+                    role="user",
+                    status="committed",
+                    sequence_number=1,
+                    content_text="Remember the user prefers short answers.",
+                ),
+                Message(
+                    session_id=session_record.id,
+                    conversation_id=session_record.conversation_id,
+                    role="assistant",
+                    status="committed",
+                    sequence_number=2,
+                    content_text="Acknowledged. I will keep answers compact.",
+                ),
+            ]
+        )
+        session.commit()
+
+        service = PromptContextService(session)
+        summary = service.update_conversation_summary(
+            agent_id=agent.id,
+            session_record=session_record,
+        )
+        session.commit()
+
+        persisted = session.exec(
+            select(SessionSummary).where(SessionSummary.session_id == session_record.id)
+        ).one()
+
+    assert summary is not None
+    assert persisted.agent_id == agent_id
+    assert persisted.conversation_id == session_record.conversation_id
+    assert persisted.source_kind == "summary"
+    assert "user: Remember the user prefers short answers." in persisted.summary_text

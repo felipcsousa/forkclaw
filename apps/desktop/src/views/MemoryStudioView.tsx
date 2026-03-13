@@ -62,17 +62,26 @@ export function MemoryStudioView({ memory }: MemoryStudioViewProps) {
     scope: 'global',
     importance: 'medium',
   });
+  const {
+    activeTab,
+    loadMemoryStudio,
+    modeFilter,
+    scopeFilter,
+    searchText,
+    sourceKindFilter,
+    stateFilter,
+  } = memory;
 
   useEffect(() => {
-    void memory.loadMemoryStudio();
+    void loadMemoryStudio();
   }, [
-    memory.activeTab,
-    memory.loadMemoryStudio,
-    memory.modeFilter,
-    memory.scopeFilter,
-    memory.searchText,
-    memory.sourceKindFilter,
-    memory.stateFilter,
+    activeTab,
+    loadMemoryStudio,
+    modeFilter,
+    scopeFilter,
+    searchText,
+    sourceKindFilter,
+    stateFilter,
   ]);
 
   function openCreateDialog(seedKind: MemoryItemCreateInput['kind']) {

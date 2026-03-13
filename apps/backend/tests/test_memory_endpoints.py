@@ -1,19 +1,34 @@
 from __future__ import annotations
 
-import json
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app.db.session import get_db_session
-from app.models.entities import Agent, Memory
+from app.models.entities import Agent, MemoryEntry, Setting
 
 
 def _default_agent_id() -> str:
     with get_db_session() as session:
         agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
     return agent.id
+
+
+def _set_feature_flag(key: str, enabled: bool) -> None:
+    with get_db_session() as session:
+        setting = session.exec(
+            select(Setting).where(Setting.scope == "features", Setting.key == key)
+        ).one()
+        setting.value_text = "true" if enabled else "false"
+        session.add(setting)
+        session.commit()
+
+
+def _enable_memory_v1(*, manual_crud: bool = True, hard_delete: bool = False) -> None:
+    _set_feature_flag("memory_v1_enabled", True)
+    _set_feature_flag("memory_manual_crud_enabled", manual_crud)
+    _set_feature_flag("memory_hard_delete_enabled", hard_delete)
 
 
 def _seed_memory(
@@ -34,30 +49,36 @@ def _seed_memory(
     original_memory_id: str | None = None,
 ) -> str:
     agent_id = _default_agent_id()
-    source_label = source_label or ("Manual" if source_kind == "manual" else "Auto-saved")
-    payload = {
-        "kind": kind,
-        "title": title,
-        "content": content,
-        "scope": scope,
-        "source_kind": source_kind,
-        "source_label": source_label,
-        "importance": importance,
-        "recall_status": recall_status,
-        "is_manual": source_kind == "manual" if is_manual is None else is_manual,
-        "is_override": is_override,
-        "origin_session_id": origin_session_id,
-        "origin_subagent_session_id": origin_subagent_session_id,
-        "original_memory_id": original_memory_id,
-    }
-    record = Memory(
+    resolved_source_kind = "autosaved" if source_kind == "automatic" else source_kind
+    scope_key = f"user/{scope.lower()}"
+    record = MemoryEntry(
         agent_id=agent_id,
-        namespace=f"memory:{kind}",
-        memory_key=f"{kind}-{uuid4().hex[:10]}",
-        value_text=json.dumps(payload, ensure_ascii=False),
-        source=source_kind,
-        status=state,
+        scope_type="stable" if kind == "stable" else "episodic",
+        scope_key=scope_key,
+        session_id=origin_session_id,
+        root_session_id=origin_session_id,
+        parent_session_id=origin_subagent_session_id,
+        source_kind=resolved_source_kind,
+        lifecycle_state="soft_deleted" if state == "deleted" else "active",
+        title=title,
+        body=content,
+        summary=content[:120],
+        importance={"low": 0.2, "medium": 0.5, "high": 0.9}[importance],
+        confidence=1.0,
+        dedupe_hash=f"seed-{uuid4().hex}",
+        created_by="user" if resolved_source_kind == "manual" else "system",
+        updated_by="user" if resolved_source_kind == "manual" else "system",
+        user_scope_key="local-user" if resolved_source_kind == "manual" else None,
+        redaction_state="clean",
+        security_state="safe",
+        hidden_from_recall=recall_status == "hidden",
+        deleted_at=None,
+        override_target_entry_id=original_memory_id if is_override else None,
     )
+    if state != "active":
+        from app.models.entities import utc_now
+
+        record.deleted_at = utc_now()
     with get_db_session() as session:
         session.add(record)
         session.commit()
@@ -66,6 +87,8 @@ def _seed_memory(
 
 
 def test_memory_items_can_be_created_filtered_and_audited(test_client: TestClient) -> None:
+    _enable_memory_v1(manual_crud=True, hard_delete=True)
+
     create_response = test_client.post(
         "/memory/items",
         json={

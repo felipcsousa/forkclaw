@@ -268,7 +268,7 @@ class ActivityService:
                 summary=self._status_summary(task_run),
                 error_message=task_run.error_message,
                 duration_ms=task_run.duration_ms,
-                estimated_cost_usd=task_run.estimated_cost_usd,
+                estimated_cost_usd=task_run.estimated_cost_usd or 0.0,
                 metadata={"task_run_id": task_run.id},
             )
         )
@@ -293,7 +293,7 @@ class ActivityService:
             status=task_run.status,
             error_message=task_run.error_message,
             duration_ms=task_run.duration_ms,
-            estimated_cost_usd=task_run.estimated_cost_usd,
+            estimated_cost_usd=task_run.estimated_cost_usd or 0.0,
             skill_strategy=skill_strategy,
             resolved_skills=resolved_skills,
             lineage=self._build_lineage(subagent_lineage, task_run),
@@ -500,7 +500,7 @@ class ActivityService:
             goal_summary=goal_summary,
             status=task_run.status,
             task_run_id=task_run.id,
-            estimated_cost_usd=task_run.estimated_cost_usd,
+            estimated_cost_usd=task_run.estimated_cost_usd or 0.0,
         )
 
     @staticmethod

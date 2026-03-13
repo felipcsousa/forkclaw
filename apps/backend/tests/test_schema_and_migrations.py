@@ -320,10 +320,24 @@ def test_runtime_migration_backfills_legacy_sessions_and_messages(tmp_path, monk
             sa.text(
                 """
                 INSERT INTO messages (
-                    id, session_id, role, status, sequence_number, content_text, created_at, updated_at
+                    id,
+                    session_id,
+                    role,
+                    status,
+                    sequence_number,
+                    content_text,
+                    created_at,
+                    updated_at
                 )
                 VALUES (
-                    :id, :session_id, :role, :status, :sequence_number, :content_text, :created_at, :updated_at
+                    :id,
+                    :session_id,
+                    :role,
+                    :status,
+                    :sequence_number,
+                    :content_text,
+                    :created_at,
+                    :updated_at
                 )
                 """
             ),
@@ -422,10 +436,26 @@ def test_memory_v1_migration_backfills_legacy_memories(tmp_path, monkeypatch) ->
             sa.text(
                 """
                 INSERT INTO memories (
-                    id, agent_id, namespace, memory_key, value_text, source, status, created_at, updated_at
+                    id,
+                    agent_id,
+                    namespace,
+                    memory_key,
+                    value_text,
+                    source,
+                    status,
+                    created_at,
+                    updated_at
                 )
                 VALUES (
-                    :id, :agent_id, :namespace, :memory_key, :value_text, :source, :status, :created_at, :updated_at
+                    :id,
+                    :agent_id,
+                    :namespace,
+                    :memory_key,
+                    :value_text,
+                    :source,
+                    :status,
+                    :created_at,
+                    :updated_at
                 )
                 """
             ),
@@ -453,7 +483,14 @@ def test_memory_v1_migration_backfills_legacy_memories(tmp_path, monkeypatch) ->
             connection.execute(
                 sa.text(
                     """
-                    SELECT scope_type, scope_key, source_kind, lifecycle_state, title, body, created_by
+                    SELECT
+                        scope_type,
+                        scope_key,
+                        source_kind,
+                        lifecycle_state,
+                        title,
+                        body,
+                        created_by
                     FROM memory_entries
                     WHERE id = :id
                     """
@@ -555,16 +592,20 @@ def test_memory_recall_migration_backfills_session_summaries(tmp_path, monkeypat
 
     upgraded_engine = sa.create_engine(f"sqlite:///{database_path}")
     with upgraded_engine.begin() as connection:
-        row = connection.execute(
-            sa.text(
-                """
+        row = (
+            connection.execute(
+                sa.text(
+                    """
                 SELECT session_id, root_session_id, agent_id, summary_text, source_kind
                 FROM session_summaries
                 WHERE session_id = :session_id
                 """
-            ),
-            {"session_id": "session-1"},
-        ).mappings().one()
+                ),
+                {"session_id": "session-1"},
+            )
+            .mappings()
+            .one()
+        )
 
     assert row["session_id"] == "session-1"
     assert row["root_session_id"] == "session-1"

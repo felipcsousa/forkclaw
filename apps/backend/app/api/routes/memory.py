@@ -312,7 +312,9 @@ def create_memory_item(
         raise _memory_http_exception(exc) from exc
 
 
-@router.get("/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True)
+@router.get(
+    "/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True
+)
 def get_memory_item(
     memory_id: str,
     session: Session = Depends(get_session),
@@ -323,7 +325,9 @@ def get_memory_item(
         raise _memory_http_exception(exc) from exc
 
 
-@router.put("/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True)
+@router.put(
+    "/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True
+)
 def update_memory_item(
     memory_id: str,
     payload: MemoryItemUpdate,
@@ -454,6 +458,8 @@ def list_session_memory_recalls(
     return SessionRecallSummariesResponse(items=items)
 
 
-@router.get("/memory/recall", response_model=MemoryRecallLogResponse, response_model_exclude_none=True)
+@router.get(
+    "/memory/recall", response_model=MemoryRecallLogResponse, response_model_exclude_none=True
+)
 def list_memory_recall_log(session: Session = Depends(get_session)) -> MemoryRecallLogResponse:
     return MemoryRecallLogResponse(items=MemoryService(session).recall_log())

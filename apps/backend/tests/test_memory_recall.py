@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlmodel import select
@@ -37,8 +38,9 @@ def _create_session(test_client: TestClient, title: str) -> dict:
 def _insert_memory_entry(
     *,
     body: str,
+    title: str | None = None,
     summary: str | None = None,
-    source_kind: str = "automatic",
+    source_kind: str = "autosaved",
     importance: float = 0.0,
     agent_id: str | None = None,
     session_id: str | None = None,
@@ -50,11 +52,38 @@ def _insert_memory_entry(
     override_target_entry_id: str | None = None,
 ) -> MemoryEntry:
     with get_db_session() as session:
+        normalized_source = "autosaved" if source_kind == "automatic" else source_kind
+        resolved_scope_type = "episodic" if session_id is not None else "stable"
+        resolved_scope_key = (
+            f"session:{session_id}"
+            if session_id is not None
+            else (
+                f"agent:{agent_id}"
+                if agent_id is not None
+                else (
+                    f"user/{user_scope_key}"
+                    if user_scope_key is not None
+                    else (
+                        f"workspace:{workspace_path}"
+                        if workspace_path is not None
+                        else "agent:default"
+                    )
+                )
+            )
+        )
         entry = MemoryEntry(
+            scope_type=resolved_scope_type,
+            scope_key=resolved_scope_key,
+            lifecycle_state="active",
+            title=title or f"memory-{uuid4().hex[:8]}",
             body=body,
             summary=summary,
-            source_kind=source_kind,
+            source_kind=normalized_source,
             importance=importance,
+            confidence=0.5,
+            dedupe_hash=f"dedupe-{uuid4().hex}",
+            created_by="user" if normalized_source == "manual" else "system",
+            updated_by="user" if normalized_source == "manual" else "system",
             agent_id=agent_id,
             session_id=session_id,
             root_session_id=root_session_id,
@@ -62,6 +91,8 @@ def _insert_memory_entry(
             user_scope_key=user_scope_key,
             hidden_from_recall=hidden_from_recall,
             deleted_at=deleted_at,
+            redaction_state="clean",
+            security_state="safe",
             override_target_entry_id=override_target_entry_id,
         )
         session.add(entry)
@@ -73,7 +104,7 @@ def _insert_memory_entry(
 def _insert_session_summary(
     *,
     summary: str,
-    source_kind: str = "automatic",
+    source_kind: str = "summary",
     importance: float = 0.0,
     agent_id: str | None = None,
     session_id: str | None = None,
@@ -85,13 +116,16 @@ def _insert_session_summary(
     override_target_summary_id: str | None = None,
 ) -> SessionSummary:
     with get_db_session() as session:
+        normalized_source = "summary" if source_kind == "automatic" else source_kind
         item = SessionSummary(
-            summary=summary,
-            source_kind=source_kind,
+            scope_key=f"session:{session_id or uuid4().hex}",
+            summary_text=summary,
+            source_kind=normalized_source,
             importance=importance,
             agent_id=agent_id,
             session_id=session_id,
             root_session_id=root_session_id,
+            created_by="user" if normalized_source == "manual" else "system",
             workspace_path=workspace_path,
             user_scope_key=user_scope_key,
             hidden_from_recall=hidden_from_recall,
@@ -151,7 +185,7 @@ def test_memory_search_prioritizes_manual_memory_over_automatic(test_client: Tes
 
     automatic = _insert_memory_entry(
         body="orchid dossier",
-        source_kind="automatic",
+        source_kind="autosaved",
         session_id=session_record["id"],
         root_session_id=session_record["root_session_id"],
     )
@@ -208,7 +242,7 @@ def test_memory_recall_preview_substitutes_automatic_entries_with_manual_overrid
     automatic = _insert_memory_entry(
         body="pineapple incident report",
         summary="base",
-        source_kind="automatic",
+        source_kind="autosaved",
         importance=0.2,
         session_id=session_record["id"],
         root_session_id=session_record["root_session_id"],
@@ -263,7 +297,7 @@ def test_hidden_manual_override_suppresses_automatic_base_from_recall(
 
     automatic = _insert_memory_entry(
         body="papaya notebook",
-        source_kind="automatic",
+        source_kind="autosaved",
         session_id=session_record["id"],
         root_session_id=session_record["root_session_id"],
     )

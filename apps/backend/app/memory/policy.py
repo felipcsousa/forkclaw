@@ -141,13 +141,14 @@ def inspect_automatic_text(*, title: str, body: str, summary: str | None) -> Mem
 def build_conversation_identity(
     *,
     session_id: str | None,
+    conversation_id: str | None,
     run_id: str | None,
     parent_session_id: str | None,
 ) -> ConversationIdentity:
     session_token = session_id or "detached"
     return ConversationIdentity(
         session_key=f"session:{session_token}",
-        conversation_id=f"conversation:{session_token}",
+        conversation_id=conversation_id or f"conversation:{session_token}",
         session_id=session_id,
         run_id=run_id,
         parent_session_id=parent_session_id,

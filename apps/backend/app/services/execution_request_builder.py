@@ -187,7 +187,10 @@ class ExecutionRequestBuilder:
             else tool_permissions_override
         )
         memory_service = MemoryService(self.session)
-        recall_candidates = memory_service.select_for_recall(input_text=input_text)
+        recall_candidates = memory_service.select_for_recall(
+            input_text=input_text,
+            session_id=session_record.id,
+        )
         resolved_input_text = memory_service.inject_recall_context(
             input_text=input_text,
             candidates=recall_candidates,
