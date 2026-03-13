@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from app.models.entities import Approval, AuditEvent, Message, Task, TaskRun, ToolCall
@@ -65,7 +66,12 @@ class ExecutionEventService:
         messages = list(self._list_messages(session_id))
         messages_by_id = {item.id: item for item in messages}
         audit_events = list(
-            self.session.exec(select(AuditEvent).order_by(AuditEvent.created_at.asc()))
+            self._list_audit_events(
+                session_id=session_id,
+                task_run_ids=task_run_ids,
+                message_ids=messages_by_id.keys(),
+                include_subagent_events=task_run_id is None,
+            )
         )
 
         events: list[ExecutionEventEnvelope] = []
@@ -326,6 +332,57 @@ class ExecutionEventService:
             select(Message)
             .where(Message.session_id == session_id)
             .order_by(Message.sequence_number.asc())
+        )
+        return self.session.exec(statement)
+
+    def _list_audit_events(
+        self,
+        *,
+        session_id: str,
+        task_run_ids: set[str],
+        message_ids: Iterable[str],
+        include_subagent_events: bool,
+    ) -> Iterable[AuditEvent]:
+        message_id_list = [item for item in message_ids]
+        criteria = []
+        if task_run_ids:
+            criteria.append(
+                and_(
+                    AuditEvent.entity_type == "task_run",
+                    AuditEvent.entity_id.in_(task_run_ids),
+                    AuditEvent.event_type.in_(
+                        [
+                            "kernel.execution.started",
+                            "kernel.execution.completed",
+                            "kernel.execution.failed",
+                            "assistant.run.created",
+                        ]
+                    ),
+                )
+            )
+        if message_id_list:
+            criteria.append(
+                and_(
+                    AuditEvent.entity_type == "message",
+                    AuditEvent.entity_id.in_(message_id_list),
+                    AuditEvent.event_type.in_(["message.user.accepted", "message.completed"]),
+                )
+            )
+        if include_subagent_events:
+            criteria.append(
+                and_(
+                    AuditEvent.event_type == "subagent.spawned",
+                    AuditEvent.payload_json.like(f'%"parent_session_id": "{session_id}"%'),
+                )
+            )
+
+        if not criteria:
+            return []
+
+        statement = (
+            select(AuditEvent)
+            .where(or_(*criteria))
+            .order_by(AuditEvent.created_at.asc())
         )
         return self.session.exec(statement)
 

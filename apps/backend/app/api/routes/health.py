@@ -39,6 +39,11 @@ async def operational_health_check(
                 "poll_interval_seconds": 0,
                 "consecutive_failures": 0,
             },
+            "execution_worker": {
+                "status": "stopped",
+                "poll_interval_seconds": 0,
+                "consecutive_failures": 0,
+            },
             "subagent_worker": {
                 "status": "stopped",
                 "poll_interval_seconds": 0,

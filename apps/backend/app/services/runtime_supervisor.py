@@ -69,10 +69,12 @@ class RuntimeSupervisor:
     def operational_health(self, session: Session) -> OperationalHealthResponse:
         repository = RuntimeHealthRepository(session)
         scheduler_snapshot = self.scheduler_probe.snapshot()
+        execution_worker_snapshot = self.execution_worker_probe.snapshot()
         subagent_worker_snapshot = self.subagent_worker_probe.snapshot()
         status = (
             "ok"
             if scheduler_snapshot.status == "running"
+            and execution_worker_snapshot.status == "running"
             and subagent_worker_snapshot.status == "running"
             else "degraded"
         )
@@ -83,6 +85,7 @@ class RuntimeSupervisor:
             version="0.1.0",
             components=OperationalComponentsHealthResponse(
                 scheduler=self._serialize_snapshot(scheduler_snapshot),
+                execution_worker=self._serialize_snapshot(execution_worker_snapshot),
                 subagent_worker=self._serialize_snapshot(subagent_worker_snapshot),
             ),
             backlog=OperationalBacklogHealthResponse(

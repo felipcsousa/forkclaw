@@ -280,6 +280,7 @@ def test_operational_health_returns_ok_when_components_are_running(
     supervisor = RuntimeSupervisor(
         get_settings(),
         scheduler_factory=_HealthyRuntimeComponent,
+        execution_worker_factory=_HealthyRuntimeComponent,
         subagent_worker_factory=_HealthyRuntimeComponent,
     )
     with _token_protected_client(
@@ -297,6 +298,7 @@ def test_operational_health_returns_ok_when_components_are_running(
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["components"]["scheduler"]["status"] == "running"
+    assert payload["components"]["execution_worker"]["status"] == "running"
     assert payload["components"]["subagent_worker"]["status"] == "running"
     assert payload["backlog"]["queued_subagents"] >= 0
 
@@ -308,6 +310,7 @@ def test_operational_health_returns_degraded_when_runtime_component_fails(
     supervisor = RuntimeSupervisor(
         get_settings(),
         scheduler_factory=_FailingRuntimeComponent,
+        execution_worker_factory=_HealthyRuntimeComponent,
         subagent_worker_factory=_HealthyRuntimeComponent,
     )
     with _token_protected_client(
@@ -326,6 +329,37 @@ def test_operational_health_returns_degraded_when_runtime_component_fails(
     assert payload["status"] == "degraded"
     assert payload["components"]["scheduler"]["status"] == "degraded"
     assert "failed to start" in payload["components"]["scheduler"]["last_error_summary"]
+    assert payload["components"]["execution_worker"]["status"] == "running"
+    assert payload["components"]["subagent_worker"]["status"] == "running"
+
+
+def test_operational_health_returns_degraded_when_execution_worker_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    supervisor = RuntimeSupervisor(
+        get_settings(),
+        scheduler_factory=_HealthyRuntimeComponent,
+        execution_worker_factory=_FailingRuntimeComponent,
+        subagent_worker_factory=_HealthyRuntimeComponent,
+    )
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        runtime_supervisor=supervisor,
+    ) as client:
+        response = client.get(
+            "/health/operational",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["components"]["scheduler"]["status"] == "running"
+    assert payload["components"]["execution_worker"]["status"] == "degraded"
+    assert "failed to start" in payload["components"]["execution_worker"]["last_error_summary"]
     assert payload["components"]["subagent_worker"]["status"] == "running"
 
 
@@ -347,6 +381,7 @@ def test_create_app_uses_default_runtime_supervisor_when_not_injected(
     assert response.status_code == 200
     payload = response.json()
     assert payload["components"]["scheduler"]["status"] != "stopped"
+    assert payload["components"]["execution_worker"]["status"] != "stopped"
     assert payload["components"]["subagent_worker"]["status"] != "stopped"
 
 

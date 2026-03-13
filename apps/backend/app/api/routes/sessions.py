@@ -194,6 +194,7 @@ async def stream_session_events(
 
     async def _event_stream():
         cursor = last_event_id
+        replay_complete_sent = task_run_id is not None
         terminal_types = {"execution.completed", "execution.failed", "approval.requested"}
         while True:
             with get_db_session() as session:
@@ -212,6 +213,12 @@ async def stream_session_events(
                 )
                 if task_run_id is not None and event.type in terminal_types:
                     return
+            if not replay_complete_sent:
+                replay_complete_sent = True
+                yield (
+                    "event: stream.ready\n"
+                    f"data: {json.dumps({'type': 'stream.ready', 'session_id': session_id, 'data': {'phase': 'live'}}, ensure_ascii=False)}\n\n"
+                )
             if await request.is_disconnected():
                 break
             yield ": keep-alive\n\n"
