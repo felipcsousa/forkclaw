@@ -14,14 +14,14 @@ from app.repositories.memory_search import (
     ResolvedMemoryContext,
 )
 from app.schemas.memory import (
-    MemoryItemRead,
-    MemoryOriginRead,
-    MemoryOverrideRead,
     MemoryRecallPreviewResponse,
     MemoryScopeContextRead,
     MemoryScopeName,
     MemoryScopesResponse,
     MemoryScopeSupportRead,
+    MemorySearchItemRead,
+    MemorySearchOriginRead,
+    MemorySearchOverrideRead,
     MemorySearchResponse,
 )
 
@@ -145,7 +145,7 @@ class MemorySearchService:
         applied_scopes: list[MemoryScopeName],
         limit: int,
         substitute_overrides: bool,
-    ) -> list[MemoryItemRead]:
+    ) -> list[MemorySearchItemRead]:
         candidate_limit = max(limit * 5, 25)
         candidates = self.repository.search_memory_entries(
             fts_query=fts_query,
@@ -302,20 +302,23 @@ class MemorySearchService:
             seen_hashes[content_hash] = duplicates_before + 1
         return ordered
 
-    def _build_item_read(self, item: dict[str, Any]) -> MemoryItemRead:
+    def _build_item_read(self, item: dict[str, Any]) -> MemorySearchItemRead:
         candidate = item["candidate"]
-        return MemoryItemRead(
+        return MemorySearchItemRead(
             record_type=candidate.record_type,
             id=candidate.id,
+            title=candidate.title,
             summary=candidate.summary,
             body=candidate.body,
             source_kind=candidate.source_kind,
             importance=candidate.importance,
             score=item["score"],
             score_breakdown=item["score_breakdown"],
-            origin=MemoryOriginRead(
+            origin=MemorySearchOriginRead(
                 table=candidate.table_name,
                 agent_id=candidate.agent_id,
+                scope_type=candidate.scope_type,
+                scope_key=candidate.scope_key,
                 session_id=candidate.session_id,
                 root_session_id=candidate.root_session_id,
                 origin_message_id=candidate.origin_message_id,
@@ -323,7 +326,7 @@ class MemorySearchService:
                 workspace_path=candidate.workspace_path,
                 matched_scopes=item["matched_scopes"],
             ),
-            override=MemoryOverrideRead(
+            override=MemorySearchOverrideRead(
                 status=item["override_status"],
                 target_id=item["target_id"],
                 effective_id=candidate.id,
@@ -483,11 +486,18 @@ class MemorySearchService:
             record_type=record_type,
             table_name=table_name,
             id=override_row.id,
+            title=override_row.title if isinstance(override_row, MemoryEntry) else None,
             body=body,
-            summary=override_row.summary,
+            summary=(
+                override_row.summary
+                if isinstance(override_row, MemoryEntry)
+                else override_row.summary_text
+            ),
             source_kind=override_row.source_kind,
             importance=override_row.importance,
             agent_id=override_row.agent_id,
+            scope_type=override_row.scope_type if isinstance(override_row, MemoryEntry) else None,
+            scope_key=override_row.scope_key,
             session_id=override_row.session_id,
             root_session_id=override_row.root_session_id,
             workspace_path=override_row.workspace_path,
@@ -504,7 +514,7 @@ class MemorySearchService:
     def _content_hash(candidate: MemoryCandidate) -> str:
         normalized = " ".join(
             part.strip().lower()
-            for part in [candidate.summary or "", candidate.body or ""]
+            for part in [candidate.title or "", candidate.summary or "", candidate.body or ""]
             if part and part.strip()
         )
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

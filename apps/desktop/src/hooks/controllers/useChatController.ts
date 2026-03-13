@@ -19,6 +19,14 @@ import {
 import {
   connectSessionExecutionStream,
   type SessionExecutionEvent,
+  fetchMemoryRecallDetail,
+  fetchSessionRecallSummaries,
+  type MemoryRecallDetailRecord,
+  type SessionRecallSummaryRecord,
+} from '../../lib/backend/memory';
+import {
+  type SessionExecutionEvent,
+  connectSessionExecutionStream,
 } from '../../lib/backend/sessionExecutionStream';
 import type { PendingSetter, RunAsyncAction } from './shared';
 import {
@@ -85,6 +93,19 @@ export function useChatController({
   const executionStreamReadyRef = useRef(false);
   const activeSessionId = activeSession?.id || null;
   const activeSessionKind = activeSession?.kind || null;
+  const [sessionRecallSummaries, setSessionRecallSummaries] = useState<
+    SessionRecallSummaryRecord[]
+  >([]);
+  const [activeRecall, setActiveRecall] = useState<MemoryRecallDetailRecord | null>(
+    null,
+  );
+  const [isRecallSheetOpen, setIsRecallSheetOpen] = useState(false);
+  const [isLoadingSessionRecallSummaries, setIsLoadingSessionRecallSummaries] =
+    useState(false);
+  const [isLoadingRecallDetail, setIsLoadingRecallDetail] = useState(false);
+  const [recallDetailErrorMessage, setRecallDetailErrorMessage] = useState<
+    string | null
+  >(null);
 
   const clearActiveSessionState = useCallback(() => {
     setActiveSession(null);
@@ -95,6 +116,10 @@ export function useChatController({
     setActiveSubagentParentSessionId(null);
     setSubagentsErrorMessage(null);
     setSubagentDetailErrorMessage(null);
+    setSessionRecallSummaries([]);
+    setActiveRecall(null);
+    setRecallDetailErrorMessage(null);
+    setIsRecallSheetOpen(false);
     setIsSubagentSheetOpen(false);
     setExecutionStreamStatus('idle');
     setExecutionStreamErrorMessage(null);
@@ -151,6 +176,35 @@ export function useChatController({
     [],
   );
 
+  const loadSessionRecallSummaries = useCallback(
+    async (
+      sessionId: string,
+      { silent = false }: { silent?: boolean } = {},
+    ) => {
+      if (!silent) {
+        setIsLoadingSessionRecallSummaries(true);
+      }
+      setRecallDetailErrorMessage(null);
+
+      try {
+        const response = await fetchSessionRecallSummaries(sessionId);
+        setSessionRecallSummaries(response.items);
+        return response;
+      } catch (error: unknown) {
+        setSessionRecallSummaries([]);
+        setRecallDetailErrorMessage(
+          toErrorMessage(error, 'Failed to load memory recall summaries.'),
+        );
+        return null;
+      } finally {
+        if (!silent) {
+          setIsLoadingSessionRecallSummaries(false);
+        }
+      }
+    },
+    [],
+  );
+
   const loadSession = useCallback(
     async (
       session: SessionRecord,
@@ -171,14 +225,18 @@ export function useChatController({
       setMessages(response.items);
 
       if (response.session.kind === 'main') {
-        await loadSubagents(response.session.id, { silent });
+        await Promise.all([
+          loadSubagents(response.session.id, { silent }),
+          loadSessionRecallSummaries(response.session.id, { silent }),
+        ]);
       } else {
         setSubagents([]);
         setSubagentsErrorMessage(null);
+        setSessionRecallSummaries([]);
       }
       return response;
     },
-    [loadSubagents, runAsyncAction],
+    [loadSessionRecallSummaries, loadSubagents, runAsyncAction],
   );
 
   const loadSubagentDetail = useCallback(
@@ -370,6 +428,9 @@ export function useChatController({
       setActiveSubagentMessages([]);
       setActiveSubagentParentSessionId(null);
       setSubagentDetailErrorMessage(null);
+      setActiveRecall(null);
+      setRecallDetailErrorMessage(null);
+      setIsRecallSheetOpen(false);
       setIsSubagentSheetOpen(false);
       await loadSession(session);
       return session;
@@ -410,6 +471,30 @@ export function useChatController({
   const handleCloseSubagent = useCallback(() => {
     setIsSubagentSheetOpen(false);
     setSubagentDetailErrorMessage(null);
+  }, []);
+
+  const handleOpenRecall = useCallback(async (assistantMessageId: string) => {
+    setRecallDetailErrorMessage(null);
+    setIsRecallSheetOpen(true);
+    try {
+      setIsLoadingRecallDetail(true);
+      const response = await fetchMemoryRecallDetail(assistantMessageId);
+      setActiveRecall(response);
+      return response;
+    } catch (error: unknown) {
+      setActiveRecall(null);
+      setRecallDetailErrorMessage(
+        toErrorMessage(error, 'Failed to load memory recall detail.'),
+      );
+      return null;
+    } finally {
+      setIsLoadingRecallDetail(false);
+    }
+  }, []);
+
+  const handleCloseRecall = useCallback(() => {
+    setIsRecallSheetOpen(false);
+    setRecallDetailErrorMessage(null);
   }, []);
 
   const handleCancelSubagent = useCallback(
@@ -694,6 +779,7 @@ export function useChatController({
     activeSubagentHasPrevious: activeSubagentIndex > 0,
     activeSubagentMessages,
     activeSubagentParentSessionId,
+    activeRecall,
     bootstrap,
     cancellingSubagentId,
     clearActiveSessionState,
@@ -703,9 +789,11 @@ export function useChatController({
     executionStreamStatus,
     hasActiveLiveRuns,
     handleCancelSubagent,
+    handleCloseRecall,
     handleCloseSubagent,
     handleCreateSession,
     handleOpenNextSubagent,
+    handleOpenRecall,
     handleOpenPreviousSubagent,
     handleOpenSubagent,
     handleReturnToParentSession,
@@ -714,21 +802,28 @@ export function useChatController({
     isBootstrapping,
     isCreatingSession,
     isLoadingMessages,
+    isLoadingRecallDetail,
+    isLoadingSessionRecallSummaries,
     isLoadingSubagentDetail,
     isLoadingSubagentMessages,
     isLoadingSubagents,
+    isRecallSheetOpen,
     isSending,
     isSubagentSheetOpen,
     liveRuns,
     loadSession,
+    loadSessionRecallSummaries,
     loadSubagentDetail,
     loadSubagentMessages,
     loadSubagents,
     messages,
+    recallDetailErrorMessage,
     refreshSessionContext,
     refreshSessionsAndSelection,
     sessions,
+    sessionRecallSummaries,
     setDraft,
+    setIsRecallSheetOpen,
     setIsSubagentSheetOpen,
     shouldPollActiveSession:
       Boolean(activeSession) &&

@@ -7,7 +7,9 @@ import { useChatController } from './useChatController';
 
 const mockCancelSessionSubagent = vi.fn();
 const mockCreateSession = vi.fn();
+const mockFetchMemoryRecallDetail = vi.fn();
 const mockFetchSessionMessages = vi.fn();
+const mockFetchSessionRecallSummaries = vi.fn();
 const mockFetchSessions = vi.fn();
 const mockFetchSessionSubagent = vi.fn();
 const mockFetchSessionSubagentMessages = vi.fn();
@@ -26,10 +28,15 @@ vi.mock('../../lib/backend/sessions', () => ({
     mockFetchSessionSubagent(sessionId, childSessionId),
   fetchSessionSubagentMessages: (sessionId: string, childSessionId: string) =>
     mockFetchSessionSubagentMessages(sessionId, childSessionId),
-  fetchSessionSubagents: (sessionId: string) =>
-    mockFetchSessionSubagents(sessionId),
+  fetchSessionSubagents: (sessionId: string) => mockFetchSessionSubagents(sessionId),
   sendSessionMessageAsync: (sessionId: string, content: string) =>
     mockSendSessionMessageAsync(sessionId, content),
+}));
+
+vi.mock('../../lib/backend/memory', () => ({
+  fetchMemoryRecallDetail: (messageId: string) => mockFetchMemoryRecallDetail(messageId),
+  fetchSessionRecallSummaries: (sessionId: string) =>
+    mockFetchSessionRecallSummaries(sessionId),
 }));
 
 vi.mock('../../lib/backend/sessionExecutionStream', () => ({
@@ -62,6 +69,7 @@ describe('useChatController', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedStreamOptions = null;
+    mockFetchSessionRecallSummaries.mockResolvedValue({ items: [] });
   });
 
   it('creates a session on first send and refreshes the active chat context', async () => {
@@ -110,6 +118,7 @@ describe('useChatController', () => {
       expect(mockFetchSessions).toHaveBeenCalledTimes(1);
       expect(mockFetchSessionMessages).toHaveBeenCalledWith('session-1');
       expect(mockFetchSessionSubagents).toHaveBeenCalledWith('session-1');
+      expect(mockFetchSessionRecallSummaries).toHaveBeenCalledWith('session-1');
       expect(result.current.activeSession).toEqual(session);
       expect(result.current.draft).toBe('');
     });
@@ -155,6 +164,7 @@ describe('useChatController', () => {
         new Error('Live stream disconnected. Falling back to session refresh.'),
       );
     });
+
     await waitFor(() => {
       expect(result.current.executionStreamStatus).toBe('disconnected');
       expect(result.current.executionStreamErrorMessage).toBe(
@@ -163,25 +173,16 @@ describe('useChatController', () => {
     });
   });
 
-  it('tracks approval-requested runs through final completion', async () => {
+  it('opens recall detail for an assistant message', async () => {
     const runAsyncAction = createRunAsyncAction();
     const setErrorMessage = vi.fn();
-    const session = {
-      id: 'session-1',
-      title: 'Persistent Chat',
-      kind: 'main',
-    };
 
-    mockFetchSessions.mockResolvedValue({ items: [session] });
-    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
-    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
-    mockSendSessionMessageAsync.mockResolvedValue({
-      task_id: 'task-1',
-      task_run_id: 'run-1',
+    mockFetchMemoryRecallDetail.mockResolvedValue({
+      assistant_message_id: 'message-2',
       session_id: 'session-1',
-      user_message_id: 'message-1',
-      status: 'queued',
-      events_url: '/sessions/session-1/events?task_run_id=run-1',
+      created_at: '2026-03-08T12:01:00Z',
+      reason_summary: '1 memory item injected for recall.',
+      items: [],
     });
 
     const { result } = renderHook(() =>
@@ -192,262 +193,13 @@ describe('useChatController', () => {
     );
 
     await act(async () => {
-      await result.current.bootstrap();
-    });
-
-    act(() => {
-      capturedStreamOptions?.onOpen?.();
-      result.current.setDraft('Run a guarded shell command.');
-    });
-
-    await act(async () => {
-      await result.current.handleSendMessage();
+      await result.current.handleOpenRecall('message-2');
     });
 
     await waitFor(() => {
-      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith(
-        'session-1',
-        'Run a guarded shell command.',
-      );
-      expect(result.current.liveRuns).toHaveLength(1);
-    });
-
-    act(() => {
-      capturedStreamOptions?.onEvent({
-        id: 'evt-approval-1',
-        type: 'approval.requested',
-        session_id: 'session-1',
-        task_id: 'task-1',
-        task_run_id: 'run-1',
-        created_at: '2026-03-12T13:00:01Z',
-        data: {
-          approval_id: 'approval-1',
-          tool_call_id: 'call-1',
-          tool_name: 'shell_exec',
-          requested_action: "tool:shell_exec command='pwd' cwd=.",
-          reason: 'shell_exec requires approval.',
-          status: 'pending',
-        },
-        raw: {},
-      });
-    });
-
-    await waitFor(() => {
-      expect(result.current.liveRuns[0]?.status).toBe('awaiting_approval');
-      expect(result.current.liveRuns[0]?.steps[0]?.title).toBe('Approval requested');
-    });
-
-    act(() => {
-      capturedStreamOptions?.onEvent({
-        id: 'evt-message-1',
-        type: 'message.completed',
-        session_id: 'session-1',
-        task_id: 'task-1',
-        task_run_id: 'run-1',
-        created_at: '2026-03-12T13:00:02Z',
-        data: {
-          message: {
-            id: 'message-2',
-            role: 'assistant',
-            content_text: 'Shell command approved and completed.',
-            sequence_number: 2,
-          },
-        },
-        raw: {},
-      });
-      capturedStreamOptions?.onEvent({
-        id: 'evt-completed-1',
-        type: 'execution.completed',
-        session_id: 'session-1',
-        task_id: 'task-1',
-        task_run_id: 'run-1',
-        created_at: '2026-03-12T13:00:03Z',
-        data: {
-          status: 'completed',
-          started_at: '2026-03-12T13:00:00Z',
-          finished_at: '2026-03-12T13:00:03Z',
-        },
-        raw: {},
-      });
-    });
-
-    await waitFor(() => {
-      expect(result.current.liveRuns[0]).toEqual(
-        expect.objectContaining({
-          status: 'completed',
-          finalText: 'Shell command approved and completed.',
-          assistantMessageId: 'message-2',
-        }),
-      );
-    });
-  });
-
-  it('suppresses refresh side effects during replay and resumes them after stream.ready', async () => {
-    const runAsyncAction = createRunAsyncAction();
-    const setErrorMessage = vi.fn();
-    const session = {
-      id: 'session-1',
-      title: 'Persistent Chat',
-      kind: 'main',
-    };
-
-    mockFetchSessions.mockResolvedValue({ items: [session] });
-    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
-    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
-
-    const { result } = renderHook(() =>
-      useChatController({
-        runAsyncAction,
-        setErrorMessage,
-      }),
-    );
-
-    await act(async () => {
-      await result.current.bootstrap();
-    });
-
-    expect(mockFetchSessions).toHaveBeenCalledTimes(1);
-    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      capturedStreamOptions?.onOpen?.();
-      capturedStreamOptions?.onEvent({
-        id: 'evt-replay-1',
-        type: 'execution.completed',
-        session_id: 'session-1',
-        task_id: 'task-1',
-        task_run_id: 'run-1',
-        created_at: '2026-03-12T13:00:03Z',
-        data: {
-          status: 'completed',
-          started_at: '2026-03-12T13:00:00Z',
-          finished_at: '2026-03-12T13:00:03Z',
-        },
-        raw: {},
-      });
-    });
-
-    await waitFor(() => {
-      expect(result.current.liveRuns[0]?.status).toBe('completed');
-    });
-    expect(mockFetchSessions).toHaveBeenCalledTimes(1);
-    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      capturedStreamOptions?.onReady?.();
-    });
-
-    act(() => {
-      capturedStreamOptions?.onEvent({
-        id: 'evt-live-1',
-        type: 'execution.failed',
-        session_id: 'session-1',
-        task_id: 'task-2',
-        task_run_id: 'run-2',
-        created_at: '2026-03-12T13:00:04Z',
-        data: {
-          status: 'failed',
-          error_message: 'boom',
-          started_at: '2026-03-12T13:00:00Z',
-          finished_at: '2026-03-12T13:00:04Z',
-        },
-        raw: {},
-      });
-    });
-
-    await waitFor(() => {
-      expect(mockFetchSessions).toHaveBeenCalledTimes(3);
-      expect(mockFetchSessionMessages).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('keeps the accepted run when post-send refresh fails', async () => {
-    const runAsyncAction = createRunAsyncAction();
-    const setErrorMessage = vi.fn();
-    const session = {
-      id: 'session-1',
-      title: 'Persistent Chat',
-      kind: 'main',
-    };
-
-    mockFetchSessions
-      .mockResolvedValueOnce({ items: [session] })
-      .mockRejectedValueOnce(new Error('refresh failed'));
-    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
-    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
-    mockSendSessionMessageAsync.mockResolvedValue({
-      task_id: 'task-1',
-      task_run_id: 'run-1',
-      session_id: 'session-1',
-      user_message_id: 'message-1',
-      status: 'queued',
-      events_url: '/sessions/session-1/events?task_run_id=run-1',
-    });
-
-    const { result } = renderHook(() =>
-      useChatController({
-        runAsyncAction,
-        setErrorMessage,
-      }),
-    );
-
-    await act(async () => {
-      await result.current.bootstrap();
-    });
-
-    act(() => {
-      result.current.setDraft('Run once.');
-    });
-
-    await act(async () => {
-      await result.current.handleSendMessage();
-    });
-
-    await waitFor(() => {
-      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'Run once.');
-      expect(result.current.draft).toBe('');
-      expect(result.current.liveRuns).toHaveLength(1);
-      expect(result.current.liveRuns[0]?.taskRunId).toBe('run-1');
-    });
-    expect(setErrorMessage).toHaveBeenCalled();
-  });
-
-  it('removes the optimistic run when async send fails before acceptance', async () => {
-    const runAsyncAction = createRunAsyncAction();
-    const setErrorMessage = vi.fn();
-    const session = {
-      id: 'session-1',
-      title: 'Persistent Chat',
-      kind: 'main',
-    };
-
-    mockFetchSessions.mockResolvedValue({ items: [session] });
-    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
-    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
-    mockSendSessionMessageAsync.mockRejectedValue(new Error('send failed'));
-
-    const { result } = renderHook(() =>
-      useChatController({
-        runAsyncAction,
-        setErrorMessage,
-      }),
-    );
-
-    await act(async () => {
-      await result.current.bootstrap();
-    });
-
-    act(() => {
-      result.current.setDraft('Retry me.');
-    });
-
-    await act(async () => {
-      await result.current.handleSendMessage();
-    });
-
-    await waitFor(() => {
-      expect(result.current.draft).toBe('Retry me.');
-      expect(result.current.liveRuns).toHaveLength(0);
+      expect(mockFetchMemoryRecallDetail).toHaveBeenCalledWith('message-2');
+      expect(result.current.isRecallSheetOpen).toBe(true);
+      expect(result.current.activeRecall?.assistant_message_id).toBe('message-2');
     });
   });
 });

@@ -236,6 +236,9 @@ class AgentExecutionService:
                 skill_resolution_payload=self.request_builder.serialize_skill_resolution(
                     prepared.request
                 ),
+                memory_recall_payload=self.request_builder.serialize_memory_recall(
+                    prepared.request
+                ),
                 assistant_message_text=normalized_result.output_text,
             )
             self.memory_capture.capture_execution_result(
@@ -278,6 +281,7 @@ class AgentExecutionService:
                 session_record=session_record,
                 result=result,
                 skill_resolution_payload=self.request_builder.serialize_skill_resolution(request),
+                memory_recall_payload=self.request_builder.serialize_memory_recall(request),
                 assistant_message_text=assistant_message_text,
                 record_message_completed_event=record_message_completed_event,
             )
@@ -574,6 +578,9 @@ class AgentExecutionService:
             session_record=prepared.session_record,
             result=result,
             skill_resolution_payload=self.request_builder.serialize_skill_resolution(
+                prepared.request
+            ),
+            memory_recall_payload=self.request_builder.serialize_memory_recall(
                 prepared.request
             ),
             assistant_message_text=result.output_text,

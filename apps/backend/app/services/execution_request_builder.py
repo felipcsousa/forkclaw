@@ -5,6 +5,8 @@ from sqlmodel import Session
 from app.kernel.contracts import (
     KernelExecutionRequest,
     KernelIdentity,
+    KernelMemoryRecall,
+    KernelMemoryRecallItem,
     KernelMessage,
     KernelRuntime,
     KernelSessionState,
@@ -13,6 +15,7 @@ from app.kernel.contracts import (
 )
 from app.models.entities import SessionRecord, Task, TaskRun, ToolPermission, utc_now
 from app.repositories.agent_execution import AgentExecutionRepository
+from app.services.memory import MemoryService
 from app.services.operational_settings import OperationalSettingsService
 from app.services.prompt_context_service import PromptContextService
 from app.services.skills import SkillService
@@ -115,6 +118,32 @@ class ExecutionRequestBuilder:
             ],
         }
 
+    def serialize_memory_recall(
+        self,
+        request: KernelExecutionRequest,
+    ) -> dict[str, object] | None:
+        if request.memory_recall is None or not request.memory_recall.items:
+            return None
+
+        return {
+            "reason_summary": request.memory_recall.reason_summary,
+            "items": [
+                {
+                    "memory_id": item.memory_id,
+                    "title": item.title,
+                    "kind": item.kind,
+                    "scope": item.scope,
+                    "source_kind": item.source_kind,
+                    "source_label": item.source_label,
+                    "importance": item.importance,
+                    "reason": item.reason,
+                    "origin_session_id": item.origin_session_id,
+                    "origin_subagent_session_id": item.origin_subagent_session_id,
+                }
+                for item in request.memory_recall.items
+            ],
+        }
+
     def _build_request(
         self,
         *,
@@ -156,6 +185,12 @@ class ExecutionRequestBuilder:
             self.repository.list_tool_permissions(agent.id)
             if tool_permissions_override is None
             else tool_permissions_override
+        )
+        memory_service = MemoryService(self.session)
+        recall_candidates = memory_service.select_for_recall(input_text=input_text)
+        resolved_input_text = memory_service.inject_recall_context(
+            input_text=input_text,
+            candidates=recall_candidates,
         )
         skill_bundle = SkillService(self.session).build_execution_bundle(
             tool_permissions=tool_permissions,
@@ -263,8 +298,30 @@ class ExecutionRequestBuilder:
                 started_at=utc_now(),
                 environment_overlay=skill_bundle.environment_overlay,
             ),
-            input_text=input_text,
+            input_text=resolved_input_text,
             prompt_context=prompt_context,
+            memory_recall=(
+                KernelMemoryRecall(
+                    reason_summary=f"{len(recall_candidates)} memory item(s) injected for recall.",
+                    items=[
+                        KernelMemoryRecallItem(
+                            memory_id=candidate.item.id,
+                            title=candidate.item.title,
+                            kind=candidate.item.kind,
+                            scope=candidate.item.scope,
+                            source_kind=candidate.item.source_kind,
+                            source_label=candidate.item.source_label,
+                            importance=candidate.item.importance,
+                            reason=candidate.reason,
+                            origin_session_id=candidate.item.origin_session_id,
+                            origin_subagent_session_id=candidate.item.origin_subagent_session_id,
+                        )
+                        for candidate in recall_candidates
+                    ],
+                )
+                if recall_candidates
+                else None
+            ),
         )
 
     @staticmethod

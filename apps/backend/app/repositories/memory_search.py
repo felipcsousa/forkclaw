@@ -35,11 +35,14 @@ class MemoryCandidate:
     record_type: str
     table_name: str
     id: str
+    title: str | None
     body: str | None
     summary: str | None
     source_kind: str
     importance: float
     agent_id: str | None
+    scope_type: str | None
+    scope_key: str | None
     session_id: str | None
     root_session_id: str | None
     workspace_path: str | None
@@ -88,11 +91,14 @@ class MemorySearchRepository:
             table_name="memory_entries",
             select_columns="""
                 me.id AS id,
+                me.title AS title,
                 me.body AS body,
                 me.summary AS summary,
                 me.source_kind AS source_kind,
                 me.importance AS importance,
                 me.agent_id AS agent_id,
+                me.scope_type AS scope_type,
+                me.scope_key AS scope_key,
                 me.session_id AS session_id,
                 me.root_session_id AS root_session_id,
                 me.workspace_path AS workspace_path,
@@ -131,11 +137,14 @@ class MemorySearchRepository:
             table_name="session_summaries",
             select_columns="""
                 ss.id AS id,
+                NULL AS title,
                 NULL AS body,
-                ss.summary AS summary,
+                ss.summary_text AS summary,
                 ss.source_kind AS source_kind,
                 ss.importance AS importance,
                 ss.agent_id AS agent_id,
+                NULL AS scope_type,
+                ss.scope_key AS scope_key,
                 ss.session_id AS session_id,
                 ss.root_session_id AS root_session_id,
                 ss.workspace_path AS workspace_path,
@@ -294,11 +303,14 @@ class MemorySearchRepository:
             record_type=record_type,
             table_name=table_name,
             id=row["id"],
+            title=row["title"],
             body=row["body"],
             summary=row["summary"],
             source_kind=row["source_kind"],
             importance=float(row["importance"] or 0.0),
             agent_id=row["agent_id"],
+            scope_type=row["scope_type"],
+            scope_key=row["scope_key"],
             session_id=row["session_id"],
             root_session_id=row["root_session_id"],
             workspace_path=row["workspace_path"],

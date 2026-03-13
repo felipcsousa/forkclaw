@@ -1,6 +1,8 @@
 import { Bot, User } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { SessionRecallSummaryRecord } from '@/lib/backend/memory';
 import { anchoredSubagentsForMessage } from '@/lib/subagents';
 import { cn } from '@/lib/utils';
 import type { SessionRecord, SubagentSessionRecord } from '../lib/backend';
@@ -11,6 +13,7 @@ import { ParentSubagentInlineCard } from './ParentSubagentInlineCard';
 interface ChatTimelineProps {
   session: SessionRecord | null;
   timelineItems: ChatTimelineItem[];
+  recallSummaries: SessionRecallSummaryRecord[];
   subagents: SubagentSessionRecord[];
   executionStreamStatus:
     | 'idle'
@@ -23,6 +26,7 @@ interface ChatTimelineProps {
   isLoading: boolean;
   isSending: boolean;
   cancellingSubagentId: string | null;
+  onOpenRecall: (assistantMessageId: string) => void;
   onOpenSubagent: (parentSessionId: string, childSessionId: string) => void;
   onCancelSubagent: (parentSessionId: string, childSessionId: string) => void;
 }
@@ -30,6 +34,7 @@ interface ChatTimelineProps {
 export function ChatTimeline({
   session,
   timelineItems,
+  recallSummaries,
   subagents,
   executionStreamStatus,
   executionStreamReconnectAttempt,
@@ -37,6 +42,7 @@ export function ChatTimeline({
   isLoading,
   isSending,
   cancellingSubagentId,
+  onOpenRecall,
   onOpenSubagent,
   onCancelSubagent,
 }: ChatTimelineProps) {
@@ -47,9 +53,7 @@ export function ChatTimeline({
           <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-muted/60">
             <Bot className="h-5 w-5 text-muted-foreground" />
           </div>
-          <p className="text-base font-medium text-foreground">
-            No active session
-          </p>
+          <p className="text-base font-medium text-foreground">No active session</p>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             Open a thread from the sidebar or start a new conversation.
           </p>
@@ -64,7 +68,7 @@ export function ChatTimeline({
         <div className="mx-auto w-full max-w-[58rem]">
           {isLoading && timelineItems.length === 0 ? (
             <div className="flex items-center justify-center py-12">
-              <p className="text-sm text-muted-foreground animate-pulse">Loading messages...</p>
+              <p className="animate-pulse text-sm text-muted-foreground">Loading messages...</p>
             </div>
           ) : timelineItems.length === 0 ? (
             <div className="flex min-h-[24rem] items-center justify-center py-6">
@@ -72,9 +76,7 @@ export function ChatTimeline({
                 <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-muted/60">
                   <Bot className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <p className="text-base font-medium text-foreground">
-                  No messages yet
-                </p>
+                <p className="text-base font-medium text-foreground">No messages yet</p>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   Start the conversation below to build context in this session.
                 </p>
@@ -102,6 +104,13 @@ export function ChatTimeline({
                 const { message } = item;
                 const isUser = message.role === 'user';
                 const anchoredSubagents = anchoredSubagentsForMessage(subagents, message.id);
+                const recallSummary = recallSummaries.find(
+                  (candidate) => candidate.assistant_message_id === message.id,
+                );
+                const recallLabel =
+                  recallSummary?.recalled_count === 1
+                    ? '1 memory used'
+                    : `${recallSummary?.recalled_count || 0} memories used`;
 
                 return (
                   <div key={message.id} className="space-y-3">
@@ -154,6 +163,19 @@ export function ChatTimeline({
                         <div className="whitespace-pre-wrap text-[15px] leading-7">
                           {message.content_text}
                         </div>
+                        {!isUser && recallSummary && recallSummary.recalled_count > 0 ? (
+                          <div className="mt-3 flex justify-start">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 rounded-full border border-border/70 px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+                              onClick={() => onOpenRecall(message.id)}
+                            >
+                              {recallLabel}
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
 
                       {isUser ? (

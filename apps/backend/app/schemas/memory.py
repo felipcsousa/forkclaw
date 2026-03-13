@@ -99,7 +99,7 @@ class MemoryHistoryItemRead(BaseModel):
     created_at: datetime
 
 
-class MemoryHistoryResponse(BaseModel):
+class MemoryEntryHistoryResponse(BaseModel):
     items: list[MemoryHistoryItemRead]
 
 
@@ -114,8 +114,8 @@ MemoryScopeName = Literal[
     "user",
     "workspace",
 ]
-MemoryRecordType = Literal["memory_entry", "session_summary"]
-MemoryOverrideStatus = Literal["none", "overrides_automatic", "overridden_by_manual"]
+MemorySearchRecordType = Literal["memory_entry", "session_summary"]
+MemorySearchOverrideStatus = Literal["none", "overrides_automatic", "overridden_by_manual"]
 
 
 class MemoryScopeContextRead(BaseModel):
@@ -131,7 +131,7 @@ class MemoryScopeSupportRead(BaseModel):
     available: bool
 
 
-class MemoryOriginRead(BaseModel):
+class MemorySearchOriginRead(BaseModel):
     table: str
     agent_id: str | None
     session_id: str | None
@@ -139,27 +139,30 @@ class MemoryOriginRead(BaseModel):
     origin_message_id: str | None
     origin_task_run_id: str | None
     workspace_path: str | None
+    scope_type: str | None = None
+    scope_key: str | None = None
     matched_scopes: list[MemoryScopeName] = Field(default_factory=list)
 
 
-class MemoryOverrideRead(BaseModel):
-    status: MemoryOverrideStatus
+class MemorySearchOverrideRead(BaseModel):
+    status: MemorySearchOverrideStatus
     target_id: str | None = None
     effective_id: str | None = None
     selected_via_substitution: bool = False
 
 
-class MemoryItemRead(BaseModel):
-    record_type: MemoryRecordType
+class MemorySearchItemRead(BaseModel):
+    record_type: MemorySearchRecordType
     id: str
+    title: str | None = None
     summary: str | None
     body: str | None
     source_kind: str
     importance: float
     score: float
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
-    origin: MemoryOriginRead
-    override: MemoryOverrideRead
+    origin: MemorySearchOriginRead
+    override: MemorySearchOverrideRead
 
 
 class MemorySearchResponse(BaseModel):
@@ -167,7 +170,7 @@ class MemorySearchResponse(BaseModel):
     normalized_query: str
     applied_scopes: list[MemoryScopeName]
     context: MemoryScopeContextRead
-    items: list[MemoryItemRead]
+    items: list[MemorySearchItemRead]
 
 
 class MemoryRecallPreviewResponse(MemorySearchResponse):
@@ -178,3 +181,105 @@ class MemoryScopesResponse(BaseModel):
     context: MemoryScopeContextRead
     default_scopes: list[MemoryScopeName]
     supported_scopes: list[MemoryScopeSupportRead]
+
+
+MemoryKind = Literal["stable", "episodic", "session_summary"]
+MemoryImportance = Literal["low", "medium", "high"]
+MemoryState = Literal["active", "deleted"]
+MemoryRecallStatus = Literal["active", "hidden"]
+MemoryListStateFilter = Literal["active", "hidden", "deleted"]
+MemoryMode = Literal["all", "manual", "automatic"]
+
+
+class MemoryItemRead(BaseModel):
+    id: str
+    kind: MemoryKind
+    title: str
+    content: str
+    scope: str
+    source_kind: str
+    source_label: str
+    importance: MemoryImportance
+    state: MemoryState
+    recall_status: MemoryRecallStatus
+    is_manual: bool
+    is_override: bool
+    origin_session_id: str | None = None
+    origin_subagent_session_id: str | None = None
+    original_memory_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryItemCreate(BaseModel):
+    kind: MemoryKind
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1)
+    scope: str = Field(default="global", min_length=1, max_length=100)
+    importance: MemoryImportance = "medium"
+
+
+class MemoryItemUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, min_length=1)
+    scope: str | None = Field(default=None, min_length=1, max_length=100)
+    importance: MemoryImportance | None = None
+
+
+class MemoryItemsResponse(BaseModel):
+    items: list[MemoryItemRead]
+
+
+class MemoryHistoryEntryRead(BaseModel):
+    id: str
+    memory_id: str
+    action: str
+    summary: str | None = None
+    snapshot: dict[str, object] | None = None
+    created_at: datetime
+
+
+class MemoryItemHistoryResponse(BaseModel):
+    items: list[MemoryHistoryEntryRead]
+
+
+class MemoryRecallItemRead(BaseModel):
+    memory_id: str
+    title: str
+    kind: MemoryKind
+    scope: str
+    source_kind: str
+    source_label: str
+    importance: MemoryImportance
+    reason: str
+    origin_session_id: str | None = None
+    origin_subagent_session_id: str | None = None
+
+
+class MemoryRecallDetailRead(BaseModel):
+    assistant_message_id: str
+    session_id: str
+    created_at: datetime
+    reason_summary: str | None = None
+    items: list[MemoryRecallItemRead]
+
+
+class MemoryRecallLogEntryRead(MemoryRecallDetailRead):
+    id: str
+    task_run_id: str | None = None
+
+
+class MemoryRecallLogResponse(BaseModel):
+    items: list[MemoryRecallLogEntryRead]
+
+
+class SessionRecallSummaryRead(BaseModel):
+    assistant_message_id: str
+    created_at: datetime
+    recalled_count: int
+    reason_summary: str | None = None
+    items: list[MemoryRecallItemRead]
+
+
+class SessionRecallSummariesResponse(BaseModel):
+    items: list[SessionRecallSummaryRead]

@@ -1,6 +1,7 @@
 import type { useAppController } from '../hooks/useAppController';
 import { ChatComposer } from '../components/ChatComposer';
 import { ChatTimeline } from '../components/ChatTimeline';
+import { MemoryRecallSheet } from '../components/MemoryRecallSheet';
 import { SessionSubagentIndex } from '../components/SessionSubagentIndex';
 
 type AppController = ReturnType<typeof useAppController>;
@@ -8,12 +9,14 @@ type AppController = ReturnType<typeof useAppController>;
 export interface ChatWorkspaceProps {
   app: AppController['app'];
   chat: AppController['chat'];
+  onOpenMemory: (memoryId: string) => void;
   onRefresh: () => void;
 }
 
 export function ChatWorkspace({
   app,
   chat,
+  onOpenMemory,
   onRefresh,
 }: ChatWorkspaceProps) {
   return (
@@ -22,6 +25,7 @@ export function ChatWorkspace({
         <ChatTimeline
           session={chat.activeSession}
           timelineItems={chat.timelineItems}
+          recallSummaries={chat.sessionRecallSummaries}
           subagents={chat.subagents}
           executionStreamStatus={chat.executionStreamStatus}
           executionStreamReconnectAttempt={chat.executionStreamReconnectAttempt}
@@ -29,6 +33,7 @@ export function ChatWorkspace({
           isLoading={chat.isBootstrapping || chat.isLoadingMessages}
           isSending={chat.isSending}
           cancellingSubagentId={chat.cancellingSubagentId}
+          onOpenRecall={chat.handleOpenRecall}
           onOpenSubagent={chat.handleOpenSubagent}
           onCancelSubagent={chat.handleCancelSubagent}
         />
@@ -50,6 +55,18 @@ export function ChatWorkspace({
         onOpen={chat.handleOpenSubagent}
         onCancel={chat.handleCancelSubagent}
         onRefresh={onRefresh}
+      />
+      <MemoryRecallSheet
+        activeRecall={chat.activeRecall}
+        errorMessage={chat.recallDetailErrorMessage}
+        isLoading={chat.isLoadingRecallDetail}
+        open={chat.isRecallSheetOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            chat.handleCloseRecall();
+          }
+        }}
+        onOpenMemory={onOpenMemory}
       />
     </div>
   );

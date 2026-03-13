@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session
 
 from app.api.errors import value_error_as_http_exception
@@ -9,15 +9,24 @@ from app.schemas.memory import (
     MemoryDeleteResponse,
     MemoryEntriesListResponse,
     MemoryEntryCreate,
+    MemoryEntryHistoryResponse,
     MemoryEntryRead,
     MemoryEntryUpdate,
     MemoryHistoryItemRead,
-    MemoryHistoryResponse,
+    MemoryItemCreate,
+    MemoryItemHistoryResponse,
+    MemoryItemRead,
+    MemoryItemsResponse,
+    MemoryItemUpdate,
+    MemoryRecallDetailRead,
+    MemoryRecallLogResponse,
     MemoryRecallPreviewResponse,
     MemoryScopeName,
     MemoryScopesResponse,
     MemorySearchResponse,
+    SessionRecallSummariesResponse,
 )
+from app.services.memory import MemoryService
 from app.services.memory_admin_service import (
     MemoryAdminService,
     MemoryConflictError,
@@ -200,17 +209,17 @@ def restore_memory_entry(
     return MemoryEntryRead.model_validate(item)
 
 
-@router.get("/memory/entries/{memory_id}/history", response_model=MemoryHistoryResponse)
+@router.get("/memory/entries/{memory_id}/history", response_model=MemoryEntryHistoryResponse)
 def list_memory_history(
     memory_id: str,
     session: Session = Depends(get_session),
-) -> MemoryHistoryResponse:
+) -> MemoryEntryHistoryResponse:
     service = MemoryAdminService(session)
     try:
         items = service.list_history(memory_id)
     except Exception as exc:  # noqa: BLE001
         raise _memory_http_exception(exc) from exc
-    return MemoryHistoryResponse(
+    return MemoryEntryHistoryResponse(
         items=[MemoryHistoryItemRead.model_validate(item) for item in items]
     )
 
@@ -262,3 +271,189 @@ def list_memory_scopes(
         return service.list_scopes(session_id=session_id)
     except Exception as exc:  # noqa: BLE001
         raise _memory_http_exception(exc) from exc
+
+
+@router.get("/memory/items", response_model=MemoryItemsResponse, response_model_exclude_none=True)
+def list_memory_items(
+    kind: str | None = Query(default=None),
+    query: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    source_kind: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    recall_status: str | None = Query(default=None),
+    mode: str = Query(default="all"),
+    session: Session = Depends(get_session),
+) -> MemoryItemsResponse:
+    items = MemoryService(session).list_items(
+        kind=kind,
+        query=query,
+        scope=scope,
+        source_kind=source_kind,
+        state=state,
+        recall_status=recall_status,
+        mode=mode,
+    )
+    return MemoryItemsResponse(items=items)
+
+
+@router.post(
+    "/memory/items",
+    response_model=MemoryItemRead,
+    status_code=status.HTTP_201_CREATED,
+    response_model_exclude_none=True,
+)
+def create_memory_item(
+    payload: MemoryItemCreate,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).create_item(payload)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.get("/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True)
+def get_memory_item(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).get_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.put("/memory/items/{memory_id}", response_model=MemoryItemRead, response_model_exclude_none=True)
+def update_memory_item(
+    memory_id: str,
+    payload: MemoryItemUpdate,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).update_item(memory_id, payload)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.post(
+    "/memory/items/{memory_id}/hide",
+    response_model=MemoryItemRead,
+    response_model_exclude_none=True,
+)
+def hide_memory_item(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).hide_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.post(
+    "/memory/items/{memory_id}/restore",
+    response_model=MemoryItemRead,
+    response_model_exclude_none=True,
+)
+def restore_memory_item(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).restore_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.post(
+    "/memory/items/{memory_id}/promote",
+    response_model=MemoryItemRead,
+    response_model_exclude_none=True,
+)
+def promote_memory_item(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).promote_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.post(
+    "/memory/items/{memory_id}/demote",
+    response_model=MemoryItemRead,
+    response_model_exclude_none=True,
+)
+def demote_memory_item(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemRead:
+    try:
+        return MemoryService(session).demote_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.delete("/memory/items/{memory_id}", status_code=status.HTTP_200_OK, response_model=None)
+def delete_memory_item(
+    memory_id: str,
+    hard: bool = Query(default=False),
+    session: Session = Depends(get_session),
+) -> MemoryItemRead | Response:
+    try:
+        deleted = MemoryService(session).delete_item(memory_id, hard=hard)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+    if hard:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return deleted
+
+
+@router.get(
+    "/memory/items/{memory_id}/history",
+    response_model=MemoryItemHistoryResponse,
+    response_model_exclude_none=True,
+)
+def get_memory_item_history(
+    memory_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryItemHistoryResponse:
+    try:
+        items = MemoryService(session).history_for_item(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+    return MemoryItemHistoryResponse(items=items)
+
+
+@router.get(
+    "/memory/recall/messages/{assistant_message_id}",
+    response_model=MemoryRecallDetailRead,
+    response_model_exclude_none=True,
+)
+def get_memory_recall_for_message(
+    assistant_message_id: str,
+    session: Session = Depends(get_session),
+) -> MemoryRecallDetailRead:
+    try:
+        return MemoryService(session).recall_for_message(assistant_message_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.get(
+    "/memory/recall/sessions/{session_id}",
+    response_model=SessionRecallSummariesResponse,
+    response_model_exclude_none=True,
+)
+def list_session_memory_recalls(
+    session_id: str,
+    session: Session = Depends(get_session),
+) -> SessionRecallSummariesResponse:
+    items = MemoryService(session).recall_for_session(session_id)
+    return SessionRecallSummariesResponse(items=items)
+
+
+@router.get("/memory/recall", response_model=MemoryRecallLogResponse, response_model_exclude_none=True)
+def list_memory_recall_log(session: Session = Depends(get_session)) -> MemoryRecallLogResponse:
+    return MemoryRecallLogResponse(items=MemoryService(session).recall_log())

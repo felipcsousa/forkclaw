@@ -7,6 +7,7 @@ import { useAgentProfileController } from './controllers/useAgentProfileControll
 import { useApprovalsController } from './controllers/useApprovalsController';
 import { useChatController } from './controllers/useChatController';
 import { useJobsController } from './controllers/useJobsController';
+import { useMemoryController } from './controllers/useMemoryController';
 import { useOperationalSettingsController } from './controllers/useOperationalSettingsController';
 import { useShellController } from './controllers/useShellController';
 import {
@@ -57,6 +58,7 @@ export function useAppController() {
   const tooling = useToolingController({ runAsyncAction });
   const approvals = useApprovalsController({ runAsyncAction });
   const jobs = useJobsController({ runAsyncAction, setErrorMessage });
+  const memory = useMemoryController({ runAsyncAction });
   const { setMobileNavOpen, setView, view } = shell;
   const {
     activeSession,
@@ -95,6 +97,7 @@ export function useAppController() {
     loadOperationalSettings,
   } = operationalSettings;
   const { loadToolingSnapshot, loadTools } = tooling;
+  const { handleOpenDetail: openMemoryDetail, loadMemoryStudio } = memory;
 
   const focusChatView = useCallback(() => {
     setView('chat');
@@ -306,6 +309,17 @@ export function useAppController() {
     [refreshJobsAndActivity, removeJob],
   );
 
+  const handleOpenMemoryStudioItem = useCallback(
+    async (memoryId: string) => {
+      setView('memory');
+      setMobileNavOpen(false);
+      await loadMemoryStudio();
+      await openMemoryDetail(memoryId);
+      return memoryId;
+    },
+    [loadMemoryStudio, openMemoryDetail, setMobileNavOpen, setView],
+  );
+
   const handleRefreshCurrentView = useCallback(async () => {
     setErrorMessage(null);
 
@@ -321,6 +335,9 @@ export function useAppController() {
         return;
       case 'tools':
         await loadTools();
+        return;
+      case 'memory':
+        await loadMemoryStudio();
         return;
       case 'approvals':
         await loadApprovals();
@@ -341,6 +358,7 @@ export function useAppController() {
     loadAgentConfig,
     loadApprovals,
     loadOperationalSettingsWithDefaultView,
+    loadMemoryStudio,
     loadTools,
     refreshJobsAndActivity,
     view,
@@ -384,6 +402,14 @@ export function useAppController() {
     refreshJobsAndActivity,
     view,
   ]);
+
+  useEffect(() => {
+    if (view !== 'memory') {
+      return;
+    }
+
+    void loadMemoryStudio();
+  }, [loadMemoryStudio, view]);
 
   useEffect(() => {
     const shouldPollChatSession =
@@ -454,6 +480,7 @@ export function useAppController() {
     chat.isBootstrapping ||
     agentProfile.isLoadingAgent ||
     tooling.isLoadingTools ||
+    memory.isLoadingMemory ||
     approvals.isLoadingApprovals ||
     jobs.isLoadingJobs ||
     activity.isLoadingActivity ||
@@ -470,6 +497,8 @@ export function useAppController() {
           return tooling.toolPermissions.length
             ? String(tooling.toolPermissions.length)
             : null;
+        case 'memory':
+          return memory.memoryItems.length ? String(memory.memoryItems.length) : null;
         case 'jobs':
           return jobs.cronJobs.length ? String(jobs.cronJobs.length) : null;
         case 'activity':
@@ -484,6 +513,7 @@ export function useAppController() {
       activity.activityItems.length,
       chat.sessions.length,
       jobs.cronJobs.length,
+      memory.memoryItems.length,
       pendingApprovalsCount,
       tooling.toolPermissions.length,
     ],
@@ -524,6 +554,10 @@ export function useAppController() {
       handleCreateJob,
       handlePauseJob,
       handleRemoveJob,
+    },
+    memory: {
+      ...memory,
+      handleOpenMemoryStudioItem,
     },
     operationalSettings: {
       ...operationalSettings,

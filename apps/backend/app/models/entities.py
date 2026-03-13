@@ -502,6 +502,13 @@ class MemoryRecallLog(TimestampedModel, table=True):
     __tablename__ = "memory_recall_log"
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    assistant_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
     memory_id: str | None = Field(default=None, sa_column=Column(String(36), nullable=True, index=True))
     scope_type: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     scope_key: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
@@ -525,6 +532,7 @@ class MemoryRecallLog(TimestampedModel, table=True):
     query_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     score: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     reason_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    reason_summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     source_kind: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
     override_status: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
 

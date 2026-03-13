@@ -60,6 +60,26 @@ class KernelToolPolicy:
 
 
 @dataclass(frozen=True)
+class KernelMemoryRecallItem:
+    memory_id: str
+    title: str
+    kind: str
+    scope: str
+    source_kind: str
+    source_label: str
+    importance: str
+    reason: str
+    origin_session_id: str | None = None
+    origin_subagent_session_id: str | None = None
+
+
+@dataclass(frozen=True)
+class KernelMemoryRecall:
+    reason_summary: str
+    items: list[KernelMemoryRecallItem] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class KernelMessage:
     message_id: str
     role: str
@@ -125,6 +145,7 @@ class KernelExecutionRequest:
     runtime: KernelRuntime
     input_text: str
     prompt_context: KernelPromptContext = field(default_factory=KernelPromptContext)
+    memory_recall: KernelMemoryRecall | None = None
 
 
 @dataclass(frozen=True)
