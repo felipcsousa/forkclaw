@@ -35,6 +35,7 @@ import { ActivityView } from './views/ActivityView';
 import { ApprovalsView } from './views/ApprovalsView';
 import { ChatWorkspace } from './views/ChatWorkspace';
 import { JobsView } from './views/JobsView';
+import { MemoryStudioView } from './views/MemoryStudioView';
 import { ProfileView } from './views/ProfileView';
 import { SettingsView } from './views/SettingsView';
 import { ToolsView } from './views/ToolsView';
@@ -47,6 +48,7 @@ function App() {
     approvals,
     chat,
     jobs,
+    memory,
     operationalSettings,
     shell,
     tooling,
@@ -59,6 +61,9 @@ function App() {
           <ChatWorkspace
             app={app}
             chat={chat}
+            onOpenMemory={(memoryId) => {
+              void memory.handleOpenMemoryStudioItem(memoryId);
+            }}
             onRefresh={() => {
               void app.handleRefreshCurrentView();
             }}
@@ -70,6 +75,8 @@ function App() {
         return <SettingsView settings={operationalSettings} />;
       case 'tools':
         return <ToolsView tooling={tooling} />;
+      case 'memory':
+        return <MemoryStudioView memory={memory} />;
       case 'approvals':
         return <ApprovalsView approvals={approvals} />;
       case 'jobs':

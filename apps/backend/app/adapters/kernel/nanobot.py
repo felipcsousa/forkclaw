@@ -19,6 +19,7 @@ from app.kernel.contracts import (
     KernelExecutionRequest,
     KernelExecutionResult,
     KernelMessage,
+    KernelPromptContext,
     KernelToolPolicy,
 )
 from app.kernel.errors import KernelExecutionCancelledError
@@ -114,6 +115,7 @@ class NanobotPromptBuilder:
             f"# Soul\n{request.soul.soul_text or '(none)'}",
             f"# User Context\n{request.soul.user_context_text or '(none)'}",
             f"# Base Policy\n{request.soul.policy_base_text or '(none)'}",
+            NanobotPromptBuilder._prompt_context_section(request.prompt_context),
             NanobotPromptBuilder._skills_section(request),
             NanobotPromptBuilder._tools_section(request.tools),
             NanobotPromptBuilder._runtime_section(request),
@@ -166,6 +168,19 @@ class NanobotPromptBuilder:
         return "\n\n".join(lines)
 
     @staticmethod
+    def _prompt_context_section(prompt_context: KernelPromptContext) -> str:
+        if not prompt_context.layers:
+            return ""
+
+        lines = ["# Context"]
+        for layer in prompt_context.layers:
+            if not layer.content:
+                continue
+            lines.append(f"## {layer.title}")
+            lines.append(layer.content)
+        return "\n\n".join(lines)
+
+    @staticmethod
     def _tools_section(tools: list[KernelToolPolicy]) -> str:
         if not tools:
             return "# Tools\nNo product tools are enabled for this execution."
@@ -192,6 +207,7 @@ class NanobotPromptBuilder:
             f"Task Run ID: {request.runtime.task_run_id}\n"
             f"Started At: {request.runtime.started_at.isoformat()}\n"
             f"Session ID: {request.session.session_id}\n"
+            f"Conversation ID: {request.session.conversation_id}\n"
             "## Settings\n"
             f"{settings or '- (none)'}"
         )

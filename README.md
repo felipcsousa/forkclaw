@@ -167,6 +167,7 @@ npm run build:desktop:bundle
 Documentacao complementar:
 
 - `docs/architecture.md`
+- `docs/memory-v1-operations.md`
 - `docs/streaming-terminal-operations.md`
 - `docs/distribution.md`
 - `docs/release-checklist.md`

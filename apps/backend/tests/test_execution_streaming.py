@@ -521,7 +521,9 @@ def test_session_stream_reconnect_replays_only_events_after_last_event_id(
     assert replay_frames[-1]["event_id"] is None
 
 
-def test_execution_event_service_filters_audit_event_query_by_scope(monkeypatch, test_client) -> None:
+def test_execution_event_service_filters_audit_event_query_by_scope(
+    monkeypatch, test_client
+) -> None:
     create_session_response = test_client.post("/sessions", json={"title": "Scoped Events"})
     assert create_session_response.status_code == 201
     session_id = create_session_response.json()["id"]

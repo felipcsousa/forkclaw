@@ -130,6 +130,9 @@ def seed_default_data(session: Session) -> Agent:
             "preferences",
             "activity_poll_seconds",
         ): ("integer", str(settings.default_activity_poll_seconds)),
+        ("features", "memory_v1_enabled"): ("boolean", "false"),
+        ("features", "memory_manual_crud_enabled"): ("boolean", "false"),
+        ("features", "memory_hard_delete_enabled"): ("boolean", "false"),
         ("tools", "policy_profile"): ("string", "minimal"),
     }
 

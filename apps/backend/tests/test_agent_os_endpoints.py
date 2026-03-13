@@ -27,6 +27,7 @@ from app.models.entities import (
     AuditEvent,
     CronJob,
     Message,
+    SessionRecord,
     Setting,
     Task,
     TaskRun,
@@ -854,6 +855,7 @@ def test_agent_execute_persists_messages_and_task_run(test_client: TestClient) -
     assert task_run.output_json is not None
     assert [event.event_type for event in audit_events] == [
         "kernel.execution.started",
+        "prompt_context.resolved",
         "skills.resolved",
         "kernel.execution.completed",
     ]
@@ -922,6 +924,70 @@ def test_session_messages_support_optional_pagination(
     full_payload = test_client.get(f"/sessions/{session_id}/messages").json()
     assert "has_more" not in full_payload
     assert "next_before_sequence" not in full_payload
+
+
+def test_session_reset_rotates_conversation_id_and_hides_old_messages(
+    test_client: TestClient,
+) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Resettable"})
+    assert create_session_response.status_code == 201
+    session_id = create_session_response.json()["id"]
+    original_conversation_id = create_session_response.json()["conversation_id"]
+
+    first_response = test_client.post(
+        f"/sessions/{session_id}/messages",
+        json={"content": "message before reset"},
+    )
+    assert first_response.status_code == 201
+
+    reset_response = test_client.post(f"/sessions/{session_id}/reset")
+    assert reset_response.status_code == 200
+    reset_payload = reset_response.json()
+
+    assert reset_payload["id"] == session_id
+    assert reset_payload["conversation_id"] != original_conversation_id
+    assert reset_payload["summary"] is None
+
+    empty_messages = test_client.get(f"/sessions/{session_id}/messages")
+    assert empty_messages.status_code == 200
+    assert empty_messages.json()["items"] == []
+
+    second_response = test_client.post(
+        f"/sessions/{session_id}/messages",
+        json={"content": "message after reset"},
+    )
+    assert second_response.status_code == 201
+
+    visible_messages = test_client.get(f"/sessions/{session_id}/messages")
+    assert visible_messages.status_code == 200
+    assert [item["content_text"] for item in visible_messages.json()["items"]] == [
+        "message after reset",
+        second_response.json()["output_text"],
+    ]
+
+    with get_db_session() as session:
+        all_messages = list(
+            session.exec(
+                select(Message)
+                .where(Message.session_id == session_id)
+                .order_by(Message.sequence_number.asc())
+            )
+        )
+        reset_event = session.exec(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == "session.conversation.reset",
+                AuditEvent.entity_id == session_id,
+            )
+            .order_by(AuditEvent.created_at.desc())
+        ).first()
+
+    assert len(all_messages) == 4
+    assert {item.conversation_id for item in all_messages} == {
+        original_conversation_id,
+        reset_payload["conversation_id"],
+    }
+    assert reset_event is not None
 
 
 def test_agent_config_can_be_updated_and_reset(test_client: TestClient) -> None:
@@ -1544,7 +1610,7 @@ def test_activity_timeline_query_budget_is_batched(
 
     assert response.status_code == 200
     assert len(response.json()["items"]) == 5
-    assert len(statements) <= 10
+    assert len(statements) <= 11
 
 
 def test_cron_job_can_be_created_and_runs_automatically(test_client: TestClient) -> None:
@@ -1691,8 +1757,12 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     parent_id = parent_response.json()["id"]
 
     with get_db_session() as session:
+        parent_session = session.exec(
+            select(SessionRecord).where(SessionRecord.id == parent_id)
+        ).one()
         parent_message = Message(
             session_id=parent_id,
+            conversation_id=parent_session.conversation_id,
             role="user",
             status="committed",
             sequence_number=1,

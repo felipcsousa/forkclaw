@@ -9,6 +9,7 @@ from sqlmodel import Session
 from app.kernel.contracts import KernelExecutionResult
 from app.models.entities import Message, SessionRecord, Task, TaskRun
 from app.repositories.agent_execution import AgentExecutionRepository
+from app.services.memory import MemoryService
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class ExecutionResultPersister:
         session_record: SessionRecord,
         result: KernelExecutionResult,
         skill_resolution_payload: dict[str, object],
+        memory_recall_payload: dict[str, object] | None = None,
         assistant_message_text: str | None = None,
         record_message_completed_event: bool = False,
     ) -> PersistedExecutionArtifacts:
@@ -86,6 +88,7 @@ class ExecutionResultPersister:
                 "model_name": result.model_name,
                 "tools_used": result.tools_used,
                 "skills": skill_resolution_payload,
+                "memory_recall": memory_recall_payload,
                 "raw_payload": result.raw_payload,
                 "pending_approval_id": result.pending_approval_id,
                 "pending_tool_call_id": result.pending_tool_call_id,
@@ -154,6 +157,13 @@ class ExecutionResultPersister:
             event_level="info",
             event_summary="Execution completed successfully.",
         )
+        if assistant_message is not None:
+            MemoryService(self.session).record_recall_event(
+                assistant_message_id=assistant_message.id,
+                session_id=session_record.id,
+                task_run_id=task_run.id,
+                payload=memory_recall_payload,
+            )
         return PersistedExecutionArtifacts(task_run=persisted, assistant_message=assistant_message)
 
     def persist_task_state(

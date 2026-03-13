@@ -43,9 +43,7 @@ def list_sessions(
         else {}
     )
     items = [
-        SessionRead.model_validate(
-            {**item.model_dump(), "subagent_counts": counts.get(item.id)}
-        )
+        SessionRead.model_validate({**item.model_dump(), "subagent_counts": counts.get(item.id)})
         for item in records
     ]
     return SessionsListResponse(items=items)
@@ -80,6 +78,29 @@ def get_session_by_id(
 
     if record is None:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    return SessionRead.model_validate(record)
+
+
+@router.post(
+    "/sessions/{session_id}/reset",
+    response_model=SessionRead,
+)
+def reset_session_conversation(
+    session_id: str,
+    session: Session = Depends(get_session),
+) -> SessionRead:
+    subagents = SubagentDelegationService(session)
+    try:
+        subagents.ensure_main_session_interaction_allowed(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+    service = AgentOSService(session)
+    try:
+        record = service.reset_session_conversation(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
 
     return SessionRead.model_validate(record)
 
@@ -215,9 +236,14 @@ async def stream_session_events(
                     return
             if not replay_complete_sent:
                 replay_complete_sent = True
+                ready_payload = {
+                    "type": "stream.ready",
+                    "session_id": session_id,
+                    "data": {"phase": "live"},
+                }
                 yield (
                     "event: stream.ready\n"
-                    f"data: {json.dumps({'type': 'stream.ready', 'session_id': session_id, 'data': {'phase': 'live'}}, ensure_ascii=False)}\n\n"
+                    f"data: {json.dumps(ready_payload, ensure_ascii=False)}\n\n"
                 )
             if await request.is_disconnected():
                 break

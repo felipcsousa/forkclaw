@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlmodel import Session
 
 from app.models.entities import Agent, AgentProfile, Message, SessionRecord, Setting
@@ -35,6 +37,29 @@ class AgentOSService:
 
     def get_session(self, session_id: str) -> SessionRecord | None:
         return self.sessions.get_session(session_id)
+
+    def reset_session_conversation(self, session_id: str) -> SessionRecord:
+        record = self.sessions.get_session(session_id)
+        if record is None:
+            msg = "Session not found."
+            raise ValueError(msg)
+        if record.kind != "main":
+            msg = "Only main sessions can reset conversation state."
+            raise ValueError(msg)
+
+        updated = self.sessions.reset_conversation(record)
+        self.sessions.record_audit_event(
+            agent_id=updated.agent_id,
+            event_type="session.conversation.reset",
+            entity_type="session",
+            entity_id=updated.id,
+            payload_json=json.dumps(
+                {"conversation_id": updated.conversation_id},
+                ensure_ascii=False,
+            ),
+            summary_text="Session conversation reset.",
+        )
+        return updated
 
     def list_session_messages(
         self,

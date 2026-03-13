@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
+  Brain,
   Bot,
   CheckCheck,
   Clock3,
@@ -14,6 +15,7 @@ export type AppView =
   | 'profile'
   | 'settings'
   | 'tools'
+  | 'memory'
   | 'approvals'
   | 'jobs'
   | 'activity';
@@ -64,6 +66,15 @@ export const APP_VIEW_DETAILS: Record<AppView, AppViewDetail> = {
     hint: 'Permissions and calls',
     icon: Wrench,
   },
+  memory: {
+    label: 'Memory',
+    eyebrow: 'Recall',
+    title: 'Memory Studio',
+    description:
+      'Browse, search, edit, and control what the agent remembers and when those memories are used.',
+    hint: 'Manual memory control',
+    icon: Brain,
+  },
   approvals: {
     label: 'Approvals',
     eyebrow: 'Review',
@@ -95,7 +106,7 @@ export const APP_VIEW_DETAILS: Record<AppView, AppViewDetail> = {
 
 export const APP_NAVIGATION_GROUPS: Array<{ title: string; items: AppView[] }> = [
   { title: 'Navigate', items: ['chat', 'activity', 'approvals'] },
-  { title: 'Operate', items: ['jobs', 'tools'] },
+  { title: 'Operate', items: ['jobs', 'memory', 'tools'] },
   { title: 'Configure', items: ['profile', 'settings'] },
 ];
 

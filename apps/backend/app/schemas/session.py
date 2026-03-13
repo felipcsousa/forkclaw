@@ -32,6 +32,7 @@ class SessionRead(BaseModel):
     spawn_depth: int
     title: str
     summary: str | None
+    conversation_id: str
     status: str
     delegated_goal: str | None
     delegated_context_snapshot: str | None

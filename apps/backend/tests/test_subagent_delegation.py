@@ -18,9 +18,11 @@ from app.core.secrets import clear_secret_store_cache
 from app.db.seed import seed_default_data
 from app.db.session import clear_engine_cache, get_db_session
 from app.models.entities import (
+    MemoryEntry,
     Message,
     SessionRecord,
     SessionSubagentRun,
+    Setting,
     ToolPermission,
     utc_now,
 )
@@ -41,6 +43,16 @@ def _wait_for(predicate, *, timeout: float = 3.0, interval: float = 0.1):
             return value
         time.sleep(interval)
     return predicate()
+
+
+def _set_feature_flag(key: str, enabled: bool) -> None:
+    with get_db_session() as session:
+        setting = session.exec(
+            select(Setting).where(Setting.scope == "features", Setting.key == key)
+        ).one()
+        setting.value_text = "true" if enabled else "false"
+        session.add(setting)
+        session.commit()
 
 
 def _alembic_config() -> Config:
@@ -267,6 +279,67 @@ def test_spawned_subagent_is_processed_to_completion_and_posts_parent_summary(
     assert counted_response.status_code == 200
     counted_item = counted_response.json()["items"][0]
     assert counted_item["subagent_counts"]["completed"] == 1
+
+
+def test_subagent_uses_only_current_parent_conversation_snapshot_and_writes_scoped_memory(
+    test_client: TestClient,
+) -> None:
+    _set_feature_flag("memory_v1_enabled", True)
+    parent_response = test_client.post("/sessions", json={"title": "Scoped Parent"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    old_message = test_client.post(
+        f"/sessions/{parent_id}/messages",
+        json={"content": "old conversation detail"},
+    )
+    assert old_message.status_code == 201
+
+    reset_response = test_client.post(f"/sessions/{parent_id}/reset")
+    assert reset_response.status_code == 200
+
+    new_message = test_client.post(
+        f"/sessions/{parent_id}/messages",
+        json={"content": "current conversation detail"},
+    )
+    assert new_message.status_code == 201
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Inspect only the current parent context.",
+            "context": "Focus on recent context only.",
+            "toolsets": ["file"],
+        },
+    )
+    assert spawn_response.status_code == 201
+    child_id = spawn_response.json()["child_session_id"]
+
+    detail_payload = _wait_for(
+        lambda: (
+            lambda payload: payload if payload["run"]["lifecycle_status"] == "completed" else None
+        )(
+            test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()
+        ),
+    )
+    assert detail_payload is not None
+
+    with get_db_session() as session:
+        child = session.exec(select(SessionRecord).where(SessionRecord.id == child_id)).one()
+        episodic_memories = list(
+            session.exec(
+                select(MemoryEntry).where(
+                    MemoryEntry.session_id == child_id,
+                    MemoryEntry.scope_type == "episodic",
+                )
+            )
+        )
+
+    assert "current conversation detail" in (child.delegated_context_snapshot or "")
+    assert "old conversation detail" not in (child.delegated_context_snapshot or "")
+    assert episodic_memories
+    assert {item.parent_session_id for item in episodic_memories} == {parent_id}
+    assert {item.conversation_id for item in episodic_memories} == {child.conversation_id}
 
 
 def test_spawn_subagent_timeout_defaults_override_and_clamp(

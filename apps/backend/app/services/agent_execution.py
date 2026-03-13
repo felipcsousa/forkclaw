@@ -18,6 +18,7 @@ from app.services.execution_result_persister import (
     ExecutionResultPersister,
     PersistedExecutionArtifacts,
 )
+from app.services.memory_capture_service import MemoryCaptureService
 from app.services.operational_settings import OperationalSettingsService
 from app.services.tools import ToolService
 from app.skills.runtime import runtime_env_overlay
@@ -53,6 +54,7 @@ class AgentExecutionService:
             session,
             repository=self._repository,
         )
+        self.memory_capture = MemoryCaptureService(session)
         self.result_persister = ExecutionResultPersister(
             session,
             repository=self._repository,
@@ -224,8 +226,8 @@ class AgentExecutionService:
                 event_summary="Subagent execution cancelled.",
             )
 
-        persisted = self._commit_action(
-            lambda: self.result_persister.persist_result(
+        def _persist_delegated_result() -> PersistedExecutionArtifacts:
+            persisted = self.result_persister.persist_result(
                 agent_id=prepared.agent_id,
                 task=prepared.task,
                 task_run=prepared.task_run,
@@ -234,9 +236,19 @@ class AgentExecutionService:
                 skill_resolution_payload=self.request_builder.serialize_skill_resolution(
                     prepared.request
                 ),
+                memory_recall_payload=self.request_builder.serialize_memory_recall(
+                    prepared.request
+                ),
                 assistant_message_text=normalized_result.output_text,
             )
-        )
+            self.memory_capture.capture_execution_result(
+                session_record=prepared.session_record,
+                task_run=persisted.task_run,
+                output_text=normalized_result.output_text,
+            )
+            return persisted
+
+        persisted = self._commit_action(_persist_delegated_result)
         return DelegatedExecutionOutcome(
             task=prepared.task,
             task_run=persisted.task_run,
@@ -269,6 +281,7 @@ class AgentExecutionService:
                 session_record=session_record,
                 result=result,
                 skill_resolution_payload=self.request_builder.serialize_skill_resolution(request),
+                memory_recall_payload=self.request_builder.serialize_memory_recall(request),
                 assistant_message_text=assistant_message_text,
                 record_message_completed_event=record_message_completed_event,
             )
@@ -543,20 +556,42 @@ class AgentExecutionService:
             raise
 
         persisted = self._commit_action(
-            lambda: self.result_persister.persist_result(
-                agent_id=prepared.agent_id,
-                task=prepared.task,
-                task_run=prepared.task_run,
-                session_record=prepared.session_record,
+            lambda: self._persist_result_with_memory_capture(
+                prepared=prepared,
                 result=result,
-                skill_resolution_payload=self.request_builder.serialize_skill_resolution(
-                    prepared.request
-                ),
-                assistant_message_text=result.output_text,
                 record_message_completed_event=record_message_completed_event,
             )
         )
         return persisted, result
+
+    def _persist_result_with_memory_capture(
+        self,
+        *,
+        prepared: PreparedExecution,
+        result: KernelExecutionResult,
+        record_message_completed_event: bool,
+    ) -> PersistedExecutionArtifacts:
+        persisted = self.result_persister.persist_result(
+            agent_id=prepared.agent_id,
+            task=prepared.task,
+            task_run=prepared.task_run,
+            session_record=prepared.session_record,
+            result=result,
+            skill_resolution_payload=self.request_builder.serialize_skill_resolution(
+                prepared.request
+            ),
+            memory_recall_payload=self.request_builder.serialize_memory_recall(
+                prepared.request
+            ),
+            assistant_message_text=result.output_text,
+            record_message_completed_event=record_message_completed_event,
+        )
+        self.memory_capture.capture_execution_result(
+            session_record=prepared.session_record,
+            task_run=persisted.task_run,
+            output_text=result.output_text,
+        )
+        return persisted
 
     @staticmethod
     def _task_payload(task: Task) -> dict[str, object]:

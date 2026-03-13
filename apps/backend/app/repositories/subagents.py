@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from app.models.entities import (
     AuditEvent,
+    Memory,
     Message,
     SessionRecord,
     SessionSubagentRun,
@@ -16,6 +17,7 @@ from app.models.entities import (
     TaskRun,
     ToolCall,
     ensure_utc,
+    generate_id,
     utc_now,
 )
 
@@ -68,6 +70,7 @@ class SubagentRepository:
             spawn_depth=parent_session.spawn_depth + 1,
             title=self._subagent_title(delegated_goal),
             summary=None,
+            conversation_id=generate_id(),
             status="queued",
             delegated_goal=delegated_goal,
             delegated_context_snapshot=delegated_context_snapshot,
@@ -178,9 +181,15 @@ class SubagentRepository:
         *,
         limit: int = 4,
     ) -> list[Message]:
+        session_record = self.get_session(session_id)
+        if session_record is None:
+            return []
         statement = (
             select(Message)
-            .where(Message.session_id == session_id)
+            .where(
+                Message.session_id == session_id,
+                Message.conversation_id == session_record.conversation_id,
+            )
             .order_by(Message.sequence_number.desc())
             .limit(limit)
         )
@@ -193,7 +202,14 @@ class SubagentRepository:
         limit: int | None = None,
         before_sequence: int | None = None,
     ) -> tuple[list[Message], bool, int | None]:
-        statement = select(Message).where(Message.session_id == session_id)
+        session_record = self.get_session(session_id)
+        if session_record is None:
+            return [], False, None
+
+        statement = select(Message).where(
+            Message.session_id == session_id,
+            Message.conversation_id == session_record.conversation_id,
+        )
         if before_sequence is not None:
             statement = statement.where(Message.sequence_number < before_sequence)
 
@@ -431,6 +447,39 @@ class SubagentRepository:
         self.session.flush()
         return message
 
+    def create_memory(
+        self,
+        *,
+        agent_id: str,
+        namespace: str,
+        memory_key: str,
+        value_text: str,
+        source: str,
+        memory_class: str,
+        scope_kind: str,
+        scope_ref: str | None,
+        session_id: str | None,
+        conversation_id: str | None,
+        parent_session_id: str | None,
+    ) -> Memory:
+        memory = Memory(
+            agent_id=agent_id,
+            namespace=namespace,
+            memory_key=memory_key,
+            value_text=value_text,
+            source=source,
+            memory_class=memory_class,
+            scope_kind=scope_kind,
+            scope_ref=scope_ref,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            parent_session_id=parent_session_id,
+            status="active",
+        )
+        self.session.add(memory)
+        self.session.flush()
+        return memory
+
     def touch_session(self, session_record: SessionRecord) -> None:
         session_record.last_message_at = utc_now()
         session_record.updated_at = utc_now()
@@ -511,6 +560,10 @@ class SubagentRepository:
         return event
 
     def _create_message_no_commit(self, *, session_id: str, role: str, content: str) -> Message:
+        session_record = self.get_session(session_id)
+        if session_record is None:
+            msg = "Session not found."
+            raise ValueError(msg)
         statement = (
             select(Message)
             .where(Message.session_id == session_id)
@@ -520,6 +573,7 @@ class SubagentRepository:
         sequence = (latest.sequence_number if latest else 0) + 1
         message = Message(
             session_id=session_id,
+            conversation_id=session_record.conversation_id,
             role=role,
             status="committed",
             sequence_number=sequence,

@@ -1,4 +1,26 @@
 export type {
+  SessionRecallSummariesResponse,
+  SessionRecallSummaryRecord,
+  MemoryHistoryEntryRecord,
+  MemoryHistoryResponse,
+  MemoryImportance,
+  MemoryItemCreateInput,
+  MemoryItemRecord,
+  MemoryItemsQuery,
+  MemoryItemsResponse,
+  MemoryItemUpdateInput,
+  MemoryKind,
+  MemoryMode,
+  MemoryRecallDetailRecord,
+  MemoryRecallItemRecord,
+  MemoryRecallLogEntryRecord,
+  MemoryRecallLogResponse,
+  MemoryRecallStatus,
+  MemoryState,
+  MemoryStateFilter,
+} from './memory';
+
+export type {
   AgentExecutionAcceptedResponse,
   ActivityAuditEventRecord,
   ActivityTimelineEntryRecord,
@@ -57,6 +79,7 @@ export type {
   ToolRisk,
   ToolStatus,
 } from './legacy';
+
 export type {
   SessionExecutionEvent,
   SessionExecutionEventApprovalData,

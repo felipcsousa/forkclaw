@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlmodel import Field, SQLModel
 
 
@@ -88,6 +98,10 @@ class SessionRecord(TimestampedModel, table=True):
     spawn_depth: int = Field(default=0, nullable=False)
     title: str = Field(sa_column=Column(String(200), nullable=False))
     summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    conversation_id: str = Field(
+        default_factory=generate_id,
+        sa_column=Column(String(36), nullable=False, index=True),
+    )
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False, index=True))
     delegated_goal: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     delegated_context_snapshot: str | None = Field(
@@ -162,6 +176,9 @@ class Message(TimestampedModel, table=True):
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
     session_id: str = Field(foreign_key="sessions.id", max_length=36, nullable=False)
+    conversation_id: str = Field(
+        sa_column=Column(String(36), nullable=False, index=True),
+    )
     role: str = Field(sa_column=Column(String(50), nullable=False, index=True))
     status: str = Field(default="committed", sa_column=Column(String(50), nullable=False))
     sequence_number: int = Field(nullable=False)
@@ -270,15 +287,276 @@ class CronJob(TimestampedModel, table=True):
 class Memory(TimestampedModel, table=True):
     __tablename__ = "memories"
 
-    __table_args__ = (UniqueConstraint("agent_id", "namespace", "memory_key"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "namespace",
+            "memory_key",
+            "memory_class",
+            "scope_kind",
+            "scope_ref",
+            "source",
+        ),
+    )
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
     agent_id: str = Field(foreign_key="agents.id", max_length=36, nullable=False)
     namespace: str = Field(default="default", sa_column=Column(String(100), nullable=False))
     memory_key: str = Field(sa_column=Column(String(150), nullable=False))
     value_text: str = Field(sa_column=Column(Text, nullable=False))
+    memory_class: str = Field(default="stable", sa_column=Column(String(50), nullable=False))
+    scope_kind: str = Field(default="agent", sa_column=Column(String(50), nullable=False))
+    scope_ref: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+    session_id: str | None = Field(default=None, foreign_key="sessions.id", max_length=36)
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(36), nullable=True, index=True),
+    )
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+    )
+    source_memory_id: str | None = Field(
+        default=None,
+        foreign_key="memories.id",
+        max_length=36,
+        nullable=True,
+    )
     source: str = Field(default="manual", sa_column=Column(String(100), nullable=False))
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
+
+
+class MemoryEntry(TimestampedModel, table=True):
+    __tablename__ = "memory_entries"
+    __table_args__ = (Index("ix_memory_entries_scope_type_scope_key", "scope_type", "scope_key"),)
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    agent_id: str | None = Field(
+        default=None,
+        foreign_key="agents.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    scope_type: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    scope_key: str = Field(sa_column=Column(String(255), nullable=False))
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True, index=True),
+    )
+    session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    root_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    source_kind: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    lifecycle_state: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    title: str = Field(sa_column=Column(String(200), nullable=False))
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    importance: float = Field(default=0.5, sa_column=Column(Float, nullable=False))
+    confidence: float = Field(default=0.5, sa_column=Column(Float, nullable=False))
+    dedupe_hash: str = Field(sa_column=Column(String(64), nullable=False, index=True))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    updated_by: str = Field(sa_column=Column(String(100), nullable=False))
+    workspace_path: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    user_scope_key: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    expires_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    redaction_state: str = Field(default="clean", sa_column=Column(String(20), nullable=False))
+    security_state: str = Field(default="safe", sa_column=Column(String(20), nullable=False))
+    hidden_from_recall: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="0"),
+    )
+    deleted_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    origin_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+        nullable=True,
+    )
+    origin_task_run_id: str | None = Field(
+        default=None,
+        foreign_key="task_runs.id",
+        max_length=36,
+        nullable=True,
+    )
+    override_target_entry_id: str | None = Field(
+        default=None,
+        foreign_key="memory_entries.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+
+
+class MemoryRelation(SQLModel, table=True):
+    __tablename__ = "memory_relations"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    from_memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    to_memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    relation_kind: str = Field(sa_column=Column(String(100), nullable=False))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class SessionSummary(TimestampedModel, table=True):
+    __tablename__ = "session_summaries"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    agent_id: str | None = Field(
+        default=None,
+        foreign_key="agents.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    scope_key: str = Field(sa_column=Column(String(255), nullable=False, index=True))
+    session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    root_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True, index=True),
+    )
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    task_run_id: str | None = Field(
+        default=None,
+        foreign_key="task_runs.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    source_kind: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    summary_text: str = Field(sa_column=Column(Text, nullable=False))
+    importance: float = Field(default=0.0, sa_column=Column(Float, nullable=False))
+    created_by: str = Field(sa_column=Column(String(100), nullable=False))
+    workspace_path: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    user_scope_key: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    hidden_from_recall: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="0"),
+    )
+    deleted_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    origin_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+        nullable=True,
+    )
+    origin_task_run_id: str | None = Field(
+        default=None,
+        foreign_key="task_runs.id",
+        max_length=36,
+        nullable=True,
+    )
+    override_target_summary_id: str | None = Field(
+        default=None,
+        foreign_key="session_summaries.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+
+
+class MemoryRecallLog(TimestampedModel, table=True):
+    __tablename__ = "memory_recall_log"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    assistant_message_id: str | None = Field(
+        default=None,
+        foreign_key="messages.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    memory_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
+    scope_type: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
+    scope_key: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True, index=True),
+    )
+    session_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
+    run_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True, index=True),
+    )
+    recall_reason: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    decision: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
+    rank: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    record_type: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True, index=True),
+    )
+    record_id: str | None = Field(
+        default=None, sa_column=Column(String(36), nullable=True, index=True)
+    )
+    query_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    score: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    reason_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    reason_summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    source_kind: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
+    override_status: str | None = Field(default=None, sa_column=Column(String(50), nullable=True))
+
+
+class MemoryChangeLog(SQLModel, table=True):
+    __tablename__ = "memory_change_log"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    memory_id: str = Field(sa_column=Column(String(36), nullable=False, index=True))
+    action: str = Field(sa_column=Column(String(100), nullable=False))
+    actor_type: str = Field(sa_column=Column(String(50), nullable=False))
+    actor_id: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
+    before_snapshot: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    after_snapshot: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
 
 
 class Document(TimestampedModel, table=True):
