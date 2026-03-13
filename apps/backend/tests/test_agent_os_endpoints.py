@@ -280,6 +280,7 @@ def test_operational_health_returns_ok_when_components_are_running(
     supervisor = RuntimeSupervisor(
         get_settings(),
         scheduler_factory=_HealthyRuntimeComponent,
+        execution_worker_factory=_HealthyRuntimeComponent,
         subagent_worker_factory=_HealthyRuntimeComponent,
     )
     with _token_protected_client(
@@ -297,6 +298,7 @@ def test_operational_health_returns_ok_when_components_are_running(
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["components"]["scheduler"]["status"] == "running"
+    assert payload["components"]["execution_worker"]["status"] == "running"
     assert payload["components"]["subagent_worker"]["status"] == "running"
     assert payload["backlog"]["queued_subagents"] >= 0
 
@@ -308,6 +310,7 @@ def test_operational_health_returns_degraded_when_runtime_component_fails(
     supervisor = RuntimeSupervisor(
         get_settings(),
         scheduler_factory=_FailingRuntimeComponent,
+        execution_worker_factory=_HealthyRuntimeComponent,
         subagent_worker_factory=_HealthyRuntimeComponent,
     )
     with _token_protected_client(
@@ -326,6 +329,37 @@ def test_operational_health_returns_degraded_when_runtime_component_fails(
     assert payload["status"] == "degraded"
     assert payload["components"]["scheduler"]["status"] == "degraded"
     assert "failed to start" in payload["components"]["scheduler"]["last_error_summary"]
+    assert payload["components"]["execution_worker"]["status"] == "running"
+    assert payload["components"]["subagent_worker"]["status"] == "running"
+
+
+def test_operational_health_returns_degraded_when_execution_worker_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    supervisor = RuntimeSupervisor(
+        get_settings(),
+        scheduler_factory=_HealthyRuntimeComponent,
+        execution_worker_factory=_FailingRuntimeComponent,
+        subagent_worker_factory=_HealthyRuntimeComponent,
+    )
+    with _token_protected_client(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        bootstrap_token="desktop-token",
+        runtime_supervisor=supervisor,
+    ) as client:
+        response = client.get(
+            "/health/operational",
+            headers={"X-Backend-Bootstrap-Token": "desktop-token"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["components"]["scheduler"]["status"] == "running"
+    assert payload["components"]["execution_worker"]["status"] == "degraded"
+    assert "failed to start" in payload["components"]["execution_worker"]["last_error_summary"]
     assert payload["components"]["subagent_worker"]["status"] == "running"
 
 
@@ -347,6 +381,7 @@ def test_create_app_uses_default_runtime_supervisor_when_not_injected(
     assert response.status_code == 200
     payload = response.json()
     assert payload["components"]["scheduler"]["status"] != "stopped"
+    assert payload["components"]["execution_worker"]["status"] != "stopped"
     assert payload["components"]["subagent_worker"]["status"] != "stopped"
 
 
@@ -1362,6 +1397,97 @@ def test_activity_timeline_surfaces_failures_clearly(test_client: TestClient) ->
     tool_entry = next(entry for entry in item["entries"] if entry["type"] == "tool_call")
     assert tool_entry["status"] == "denied"
     assert "denied by policy" in tool_entry["summary"]
+
+
+def test_shell_exec_defaults_to_ask_and_includes_resolved_cwd_in_approval(
+    test_client: TestClient,
+) -> None:
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={
+            "title": "Shell Approval Session",
+            "message": "tool:shell_exec command='pwd' cwd=.",
+        },
+    )
+    assert execute_response.status_code == 201
+    payload = execute_response.json()
+
+    assert payload["status"] == "awaiting_approval"
+
+    approvals_response = test_client.get("/approvals")
+    assert approvals_response.status_code == 200
+    approvals = approvals_response.json()["items"]
+    approval_item = next(item for item in approvals if item["tool_name"] == "shell_exec")
+
+    workspace_root = test_client.get("/tools/permissions").json()["workspace_root"]
+    assert workspace_root in approval_item["requested_action"]
+    assert '"command": "pwd"' in (approval_item["tool_input_json"] or "")
+
+
+def test_shell_exec_persists_structured_output_payload(test_client: TestClient) -> None:
+    permission_response = test_client.put(
+        "/tools/permissions/shell_exec",
+        json={"permission_level": "allow"},
+    )
+    assert permission_response.status_code == 200
+
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={
+            "title": "Shell Persisted Output Session",
+            "message": "tool:shell_exec command='echo hello' cwd=.",
+        },
+    )
+    assert execute_response.status_code == 201
+    payload = execute_response.json()
+
+    assert payload["status"] == "completed"
+    assert "shell_exec" in payload["tools_used"]
+
+    with get_db_session() as session:
+        tool_call = session.exec(
+            select(ToolCall)
+            .where(ToolCall.tool_name == "shell_exec")
+            .order_by(ToolCall.created_at.desc())
+        ).one()
+
+    output_payload = json.loads(tool_call.output_json or "{}")
+    assert output_payload["data"]["stdout"] == "hello\n"
+    assert output_payload["data"]["stderr"] == ""
+    assert output_payload["data"]["exit_code"] == 0
+    assert output_payload["data"]["cwd_resolved"].endswith("/workspace")
+    assert output_payload["data"]["truncated"] is False
+
+
+def test_shell_exec_activity_timeline_includes_runtime_events(test_client: TestClient) -> None:
+    permission_response = test_client.put(
+        "/tools/permissions/shell_exec",
+        json={"permission_level": "allow"},
+    )
+    assert permission_response.status_code == 200
+
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={
+            "title": "Shell Timeline Session",
+            "message": "tool:shell_exec command='pwd' cwd=.",
+        },
+    )
+    assert execute_response.status_code == 201
+
+    response = test_client.get("/activity/timeline")
+    assert response.status_code == 200
+    item = next(
+        current
+        for current in response.json()["items"]
+        if current["session_title"] == "Shell Timeline Session"
+    )
+
+    audit_event_types = {entry["event_type"] for entry in item["audit_log"]}
+    assert {"tool.started", "tool.completed"} <= audit_event_types
+
+    audit_titles = {entry["title"] for entry in item["entries"] if entry["type"] == "audit"}
+    assert {"tool.started", "tool.completed"} <= audit_titles
 
 
 def test_activity_timeline_supports_optional_cursor_pagination(

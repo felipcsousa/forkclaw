@@ -1,4 +1,6 @@
 export {
+  type AgentExecutionAcceptedResponse,
+  type AgentExecutionResponse,
   cancelSessionSubagent,
   createSession,
   fetchSessionMessages,
@@ -6,6 +8,7 @@ export {
   fetchSessionSubagent,
   fetchSessionSubagentMessages,
   fetchSessionSubagents,
+  sendSessionMessageAsync,
   sendSessionMessage,
   type MessageRecord,
   type SessionMessagesResponse,

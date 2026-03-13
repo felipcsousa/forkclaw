@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { vi } from 'vitest';
 
@@ -10,6 +10,10 @@ import {
   DESKTOP_SIDEBAR_PANEL_SIZE,
 } from './components/app-shell-layout';
 import { TooltipProvider } from './components/ui/tooltip';
+import type {
+  SessionExecutionEvent,
+  SessionExecutionStreamOptions,
+} from './lib/backend/sessionExecutionStream';
 
 const baseTimestamp = '2026-03-08T12:00:00Z';
 
@@ -20,7 +24,7 @@ const mockFetchSessionSubagents = vi.fn();
 const mockFetchSessionSubagent = vi.fn();
 const mockFetchSessionSubagentMessages = vi.fn();
 const mockCancelSessionSubagent = vi.fn();
-const mockSendSessionMessage = vi.fn();
+const mockSendSessionMessageAsync = vi.fn();
 const mockFetchAgentConfig = vi.fn();
 const mockUpdateAgentConfig = vi.fn();
 const mockResetAgentConfig = vi.fn();
@@ -43,6 +47,7 @@ const mockCreateCronJob = vi.fn();
 const mockPauseCronJob = vi.fn();
 const mockActivateCronJob = vi.fn();
 const mockDeleteCronJob = vi.fn();
+const mockConnectSessionExecutionStream = vi.fn();
 const defaultMatchMedia = window.matchMedia;
 const providerLabelMap: Record<string, string> = {
   product_echo: 'Product Echo (local fallback)',
@@ -406,8 +411,8 @@ vi.mock('./lib/backend', () => ({
     mockFetchSessionSubagentMessages(sessionId, childSessionId),
   cancelSessionSubagent: (sessionId: string, childSessionId: string) =>
     mockCancelSessionSubagent(sessionId, childSessionId),
-  sendSessionMessage: (sessionId: string, content: string) =>
-    mockSendSessionMessage(sessionId, content),
+  sendSessionMessageAsync: (sessionId: string, content: string) =>
+    mockSendSessionMessageAsync(sessionId, content),
   fetchAgentConfig: () => mockFetchAgentConfig(),
   updateAgentConfig: (payload: unknown) => mockUpdateAgentConfig(payload),
   resetAgentConfig: () => mockResetAgentConfig(),
@@ -491,8 +496,8 @@ vi.mock('./lib/backend/sessions', () => ({
     mockFetchSessionSubagentMessages(sessionId, childSessionId),
   fetchSessionSubagents: (sessionId: string) =>
     mockFetchSessionSubagents(sessionId),
-  sendSessionMessage: (sessionId: string, content: string) =>
-    mockSendSessionMessage(sessionId, content),
+  sendSessionMessageAsync: (sessionId: string, content: string) =>
+    mockSendSessionMessageAsync(sessionId, content),
 }));
 
 vi.mock('./lib/backend/tools', () => ({
@@ -506,6 +511,17 @@ vi.mock('./lib/backend/tools', () => ({
   updateToolPermission: (toolName: string, level: string) =>
     mockUpdateToolPermission(toolName, level),
   updateToolPolicy: (profileId: string) => mockUpdateToolPolicy(profileId),
+}));
+
+vi.mock('./lib/backend/sessionExecutionStream', () => ({
+  connectSessionExecutionStream: (options: SessionExecutionStreamOptions) => {
+    lastSessionExecutionStreamOptions = options;
+    mockConnectSessionExecutionStream(options);
+    options.onOpen?.();
+    return {
+      close: vi.fn(),
+    };
+  },
 }));
 
 const agentConfig = {
@@ -538,6 +554,16 @@ const agentConfig = {
   },
 };
 
+let lastSessionExecutionStreamOptions: SessionExecutionStreamOptions | null = null;
+
+function emitSessionExecutionEvent(event: SessionExecutionEvent) {
+  if (!lastSessionExecutionStreamOptions) {
+    throw new Error('Session execution stream was not connected.');
+  }
+
+  lastSessionExecutionStreamOptions.onEvent(event);
+}
+
 function renderApp() {
   return render(
     <TooltipProvider delayDuration={0}>
@@ -549,6 +575,7 @@ function renderApp() {
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lastSessionExecutionStreamOptions = null;
     window.matchMedia = defaultMatchMedia;
     mockFetchAgentConfig.mockResolvedValue(agentConfig);
     mockFetchToolCatalog.mockResolvedValue({
@@ -635,8 +662,13 @@ describe('App', () => {
           }),
         ],
       });
-    mockSendSessionMessage.mockResolvedValueOnce({
-      status: 'completed',
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
+      task_id: 'task-send-1',
+      task_run_id: 'run-send-1',
+      session_id: session.id,
+      user_message_id: 'message-1',
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-send-1`,
     });
 
     renderApp();
@@ -651,7 +683,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
-      expect(mockSendSessionMessage).toHaveBeenCalledWith('session-1', 'hello kernel'),
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'hello kernel'),
     );
 
     await waitFor(() =>
@@ -667,7 +699,14 @@ describe('App', () => {
 
     mockFetchSessions.mockResolvedValueOnce({ items: [session] });
     mockFetchSessionMessages.mockResolvedValueOnce({ session, items: [] });
-    mockSendSessionMessage.mockResolvedValueOnce({ status: 'completed' });
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
+      task_id: 'task-send-2',
+      task_run_id: 'run-send-2',
+      session_id: session.id,
+      user_message_id: 'message-1',
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-send-2`,
+    });
 
     renderApp();
 
@@ -722,7 +761,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
-      expect(mockSendSessionMessage).toHaveBeenCalledWith('session-1', 'hello kernel'),
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'hello kernel'),
     );
     await waitFor(() => expect(mockFetchSessions).toHaveBeenCalledTimes(1));
 
@@ -736,6 +775,116 @@ describe('App', () => {
     expect(mockFetchToolCalls).toHaveBeenCalledTimes(1);
     expect(mockFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockFetchCronJobsDashboard).not.toHaveBeenCalled();
+  });
+
+  it('renders live tool execution inline and consolidates the final assistant response from SSE', async () => {
+    const session = makeSession({
+      last_message_at: '2026-03-08T12:01:00Z',
+      updated_at: '2026-03-08T12:01:00Z',
+    });
+
+    mockFetchSessions
+      .mockResolvedValueOnce({ items: [session] })
+      .mockResolvedValueOnce({ items: [session] });
+    mockFetchSessionMessages
+      .mockResolvedValueOnce({ session, items: [] })
+      .mockResolvedValueOnce({
+        session,
+        items: [
+          makeMessage({
+            id: 'message-user-live-1',
+            session_id: session.id,
+            content_text: 'Run the workspace checks.',
+            created_at: '2026-03-08T12:02:00Z',
+            updated_at: '2026-03-08T12:02:00Z',
+          }),
+        ],
+      });
+    mockSendSessionMessageAsync.mockResolvedValueOnce({
+      task_id: 'task-live-1',
+      task_run_id: 'run-live-1',
+      session_id: session.id,
+      user_message_id: 'message-user-live-1',
+      status: 'queued',
+      events_url: `/sessions/${session.id}/events?task_run_id=run-live-1`,
+    });
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Persistent Chat' })).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(mockConnectSessionExecutionStream).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.change(screen.getByLabelText(/message/i), {
+      target: { value: 'Run the workspace checks.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith(
+        'session-1',
+        'Run the workspace checks.',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByText('Run the workspace checks.')).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      emitSessionExecutionEvent({
+        id: 'evt-tool-live-1',
+        type: 'tool.completed',
+        session_id: session.id,
+        task_run_id: 'run-live-1',
+        created_at: '2026-03-08T12:02:01Z',
+        task_id: 'task-live-1',
+        data: {
+          tool_call_id: 'call-shell-live-1',
+          tool_name: 'shell_exec',
+          status: 'completed',
+          started_at: '2026-03-08T12:02:00Z',
+          finished_at: '2026-03-08T12:02:01Z',
+          input_json: '{"command":"npm test"}',
+          output_json:
+            '{"text":"Shell command finished with exit code 0 in 1000 ms.","data":{"exit_code":0,"stdout":"PASS src/app.test.ts\\n8 passed","stderr":"","duration_ms":1000,"cwd_resolved":"/workspace","truncated":false}}',
+        },
+        raw: {},
+      } as SessionExecutionEvent);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('Exit 0 · PASS src/app.test.ts')).toBeInTheDocument(),
+    );
+    expect(screen.getByText('shell_exec')).toBeInTheDocument();
+
+    await act(async () => {
+      emitSessionExecutionEvent({
+        id: 'evt-message-live-1',
+        type: 'message.completed',
+        session_id: session.id,
+        task_run_id: 'run-live-1',
+        created_at: '2026-03-08T12:02:02Z',
+        task_id: 'task-live-1',
+        data: {
+          message: {
+            id: 'message-assistant-live-1',
+            role: 'assistant',
+            content_text: 'Workspace checks finished successfully.',
+            sequence_number: 2,
+          },
+        },
+        raw: {},
+      } as SessionExecutionEvent);
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Workspace checks finished successfully.'),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('renders inline subagent cards, a child-session index, and opens the child session sheet', async () => {

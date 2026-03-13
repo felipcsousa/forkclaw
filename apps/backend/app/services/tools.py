@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from nanobot.providers.base import ToolCallRequest
 from sqlmodel import Session
@@ -231,11 +232,23 @@ class ToolService(ToolExecutionPort):
             )
 
         if permission.permission_level == "ask" and not approval_override:
+            try:
+                requested_action = self._requested_action(
+                    tool_name=tool_call.name,
+                    arguments=tool_call.arguments,
+                )
+            except Exception as exc:
+                return self._record_failed_tool_call(
+                    agent_id=request.identity.agent_id,
+                    tool_record=tool_record,
+                    tool_name=tool_call.name,
+                    error=exc,
+                )
             approval = self.repository.create_approval(
                 agent_id=request.identity.agent_id,
                 task_id=request.runtime.task_id,
                 tool_call_id=tool_record.id,
-                requested_action=f"{tool_call.name}({tool_call.arguments})",
+                requested_action=requested_action,
                 reason="Tool permission is configured as ask.",
             )
             self.repository.update_tool_call(
@@ -310,6 +323,21 @@ class ToolService(ToolExecutionPort):
         completion_payload: dict[str, object] | None = None,
     ) -> ToolExecutionOutcome:
         try:
+            self._record_tool_started(
+                agent_id=agent_id,
+                tool_record=tool_record,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+        except Exception as exc:
+            return self._record_failed_tool_call(
+                agent_id=agent_id,
+                tool_record=tool_record,
+                tool_name=tool_name,
+                error=exc,
+            )
+
+        try:
             result = self._execute_tool(tool_name, permission, arguments)
         except Exception as exc:
             return self._record_failed_tool_call(
@@ -340,6 +368,10 @@ class ToolService(ToolExecutionPort):
             cache_store=SqlToolCacheStore(self.repository),
             runtime_settings={
                 "tool_timeout_seconds": get_settings().tool_timeout_seconds,
+                "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
+                "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
+                "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
                 "web_search_cache_ttl_seconds": get_settings().web_search_cache_ttl_seconds,
                 "web_fetch_cache_ttl_seconds": get_settings().web_fetch_cache_ttl_seconds,
                 "web_fetch_max_response_bytes": get_settings().web_fetch_max_response_bytes,
@@ -347,6 +379,26 @@ class ToolService(ToolExecutionPort):
             },
         )
         return tool.execute(context=context, arguments=arguments)
+
+    def _record_tool_started(
+        self,
+        *,
+        agent_id: str,
+        tool_record,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        payload = {"tool_name": tool_name}
+        payload.update(self._tool_preview(tool_name=tool_name, arguments=arguments))
+        summary = payload.get("summary")
+        self.repository.record_audit_event(
+            agent_id=agent_id,
+            event_type="tool.started",
+            entity_type="tool_call",
+            entity_id=tool_record.id,
+            payload=payload,
+            summary_text=str(summary) if isinstance(summary, str) else f"Started `{tool_name}`.",
+        )
 
     def _record_completed_tool_call(
         self,
@@ -372,6 +424,19 @@ class ToolService(ToolExecutionPort):
             entity_type="tool_call",
             entity_id=tool_record.id,
             payload=payload,
+        )
+        completion_payload = {"tool_name": tool_name}
+        if isinstance(output_data, dict):
+            for key in ("exit_code", "duration_ms", "cwd_resolved", "truncated"):
+                if key in output_data:
+                    completion_payload[key] = output_data[key]
+        self.repository.record_audit_event(
+            agent_id=agent_id,
+            event_type="tool.completed",
+            entity_type="tool_call",
+            entity_id=tool_record.id,
+            payload=completion_payload,
+            summary_text=f"Completed `{tool_name}`.",
         )
         return ToolExecutionOutcome(
             tool_call_id=tool_record.id,
@@ -400,6 +465,19 @@ class ToolService(ToolExecutionPort):
             entity_type="tool_call",
             entity_id=tool_record.id,
             payload={"tool_name": tool_name, "error": str(error)},
+        )
+        failure_payload = {"tool_name": tool_name, "error": str(error)}
+        audit_payload = getattr(error, "audit_payload", None)
+        if isinstance(audit_payload, dict):
+            failure_payload.update(audit_payload)
+        self.repository.record_audit_event(
+            agent_id=agent_id,
+            event_type="tool.failed",
+            entity_type="tool_call",
+            entity_id=tool_record.id,
+            payload=failure_payload,
+            level="error",
+            summary_text=f"Failed `{tool_name}`: {error}",
         )
         return ToolExecutionOutcome(
             tool_call_id=tool_record.id,
@@ -462,6 +540,53 @@ class ToolService(ToolExecutionPort):
             return Path(permission.workspace_path).resolve()
         return self._workspace_root()
 
+    def _tool_preview(self, *, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = self.registry.get(tool_name)
+        preview_method = getattr(tool, "preview", None)
+        if not callable(preview_method):
+            return {}
+        context = ToolExecutionContext(
+            workspace_root=self._workspace_root(),
+            cache_store=SqlToolCacheStore(self.repository),
+            runtime_settings={
+                "tool_timeout_seconds": get_settings().tool_timeout_seconds,
+                "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
+                "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
+                "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
+            },
+        )
+        preview = preview_method(context=context, arguments=arguments)
+        if hasattr(preview, "__dict__"):
+            payload = dict(preview.__dict__)
+        elif isinstance(preview, dict):
+            payload = dict(preview)
+        else:
+            return {}
+        if tool_name == "shell_exec":
+            payload["summary"] = (
+                f"Running `{tool_name}` in {payload.get('cwd_resolved', self._workspace_root())}."
+            )
+        return payload
+
+    def _requested_action(self, *, tool_name: str, arguments: dict[str, Any]) -> str:
+        tool = self.registry.get(tool_name)
+        requested_action_method = getattr(tool, "requested_action", None)
+        if not callable(requested_action_method):
+            return f"{tool_name}({arguments})"
+        context = ToolExecutionContext(
+            workspace_root=self._workspace_root(),
+            cache_store=SqlToolCacheStore(self.repository),
+            runtime_settings={
+                "tool_timeout_seconds": get_settings().tool_timeout_seconds,
+                "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
+                "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
+                "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
+            },
+        )
+        return str(requested_action_method(context=context, arguments=arguments))
+
     @staticmethod
     def _skill_summaries_from_output(output_json: str | None) -> list[SkillSummaryRead]:
         if not output_json:
@@ -485,3 +610,43 @@ class ToolService(ToolExecutionPort):
             except Exception:
                 continue
         return summaries
+
+    def _shell_exec_allowed_cwd_roots(self) -> list[str]:
+        setting = self.repository.get_setting("runtime", "shell_exec_allowed_cwd_roots")
+        if setting and setting.value_json:
+            try:
+                parsed = json.loads(setting.value_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if isinstance(item, str)]
+        return list(get_settings().shell_exec_allowed_cwd_roots)
+
+    def _shell_exec_allowed_env_keys(self) -> list[str]:
+        setting = self.repository.get_setting("runtime", "shell_exec_allowed_env_keys")
+        if setting and setting.value_json:
+            try:
+                parsed = json.loads(setting.value_json)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if isinstance(item, str)]
+        return list(get_settings().shell_exec_allowed_env_keys)
+
+    def _shell_exec_max_output_chars(self) -> int:
+        setting = self.repository.get_setting("runtime", "shell_exec_max_output_chars")
+        if setting and setting.value_text:
+            try:
+                return int(setting.value_text)
+            except ValueError:
+                pass
+        return get_settings().shell_exec_max_output_chars
+
+    def _shell_exec_max_timeout_seconds(self) -> float:
+        setting = self.repository.get_setting("runtime", "shell_exec_max_timeout_seconds")
+        if setting and setting.value_text:
+            try:
+                return float(setting.value_text)
+            except ValueError:
+                pass
+        return get_settings().shell_exec_max_timeout_seconds

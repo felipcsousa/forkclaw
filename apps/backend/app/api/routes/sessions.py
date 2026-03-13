@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import asyncio
+import json
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.api.errors import value_error_as_http_exception
-from app.db.session import get_session
-from app.schemas.execution import AgentExecutionResponse
+from app.db.session import get_db_session, get_session
+from app.schemas.execution import AgentExecutionAcceptedResponse, AgentExecutionResponse
 from app.schemas.message import MessageRead, SessionMessageCreate, SessionMessagesResponse
 from app.schemas.session import (
     SessionCreate,
@@ -19,6 +23,7 @@ from app.schemas.session import (
 )
 from app.services.agent_execution import AgentExecutionService
 from app.services.agent_os import AgentOSService
+from app.services.execution_events import ExecutionEventService
 from app.services.subagents import SubagentDelegationService
 
 router = APIRouter(tags=["sessions"])
@@ -140,6 +145,94 @@ def post_session_message(
         )
     except ValueError as exc:
         raise value_error_as_http_exception(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/messages/async",
+    response_model=AgentExecutionAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def post_session_message_async(
+    session_id: str,
+    payload: SessionMessageCreate,
+    session: Session = Depends(get_session),
+) -> AgentExecutionAcceptedResponse:
+    subagents = SubagentDelegationService(session)
+    try:
+        subagents.ensure_main_session_interaction_allowed(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+    service = AgentExecutionService(session)
+
+    try:
+        return service.enqueue_simple(
+            session_id=session_id,
+            title=None,
+            message=payload.content,
+        )
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+
+@router.get("/sessions/{session_id}/events")
+async def stream_session_events(
+    session_id: str,
+    request: Request,
+    task_run_id: str | None = Query(default=None),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    with get_db_session() as session:
+        subagents = SubagentDelegationService(session)
+        try:
+            subagents.ensure_main_session_interaction_allowed(session_id)
+        except ValueError as exc:
+            raise value_error_as_http_exception(exc) from exc
+
+        if AgentOSService(session).get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="Session not found.")
+
+    async def _event_stream():
+        cursor = last_event_id
+        replay_complete_sent = task_run_id is not None
+        terminal_types = {"execution.completed", "execution.failed", "approval.requested"}
+        while True:
+            with get_db_session() as session:
+                service = ExecutionEventService(session)
+                events = service.list_events(
+                    session_id=session_id,
+                    task_run_id=task_run_id,
+                    after_event_id=cursor,
+                )
+            for event in events:
+                cursor = event.id
+                yield (
+                    f"id: {event.id}\n"
+                    f"event: {event.type}\n"
+                    f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+                )
+                if task_run_id is not None and event.type in terminal_types:
+                    return
+            if not replay_complete_sent:
+                replay_complete_sent = True
+                yield (
+                    "event: stream.ready\n"
+                    f"data: {json.dumps({'type': 'stream.ready', 'session_id': session_id, 'data': {'phase': 'live'}}, ensure_ascii=False)}\n\n"
+                )
+            if await request.is_disconnected():
+                break
+            yield ": keep-alive\n\n"
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(

@@ -18,7 +18,9 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("timeout_seconds", sa.Float(), nullable=True))
 
     with op.batch_alter_table("session_subagent_runs") as batch_op:
-        batch_op.add_column(sa.Column("parent_summary_message_id", sa.String(length=36), nullable=True))
+        batch_op.add_column(
+            sa.Column("parent_summary_message_id", sa.String(length=36), nullable=True)
+        )
         batch_op.create_foreign_key(
             "fk_session_subagent_runs_parent_summary_message_id_messages",
             "messages",

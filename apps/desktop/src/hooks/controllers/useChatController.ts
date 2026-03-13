@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import {
   cancelSessionSubagent,
@@ -8,14 +8,32 @@ import {
   fetchSessionSubagent,
   fetchSessionSubagentMessages,
   fetchSessionSubagents,
-  sendSessionMessage,
+  sendSessionMessageAsync,
+  type AgentExecutionAcceptedResponse,
   type MessageRecord,
   type SessionRecord,
+  type SessionMessagesResponse,
   type SessionSubagentsListResponse,
   type SubagentSessionRecord,
 } from '../../lib/backend/sessions';
+import {
+  connectSessionExecutionStream,
+  type SessionExecutionEvent,
+} from '../../lib/backend/sessionExecutionStream';
 import type { PendingSetter, RunAsyncAction } from './shared';
+import {
+  buildChatTimelineItems,
+  chatExecutionStateReducer,
+  createInitialChatExecutionState,
+} from './chatExecutionState';
 import { toErrorMessage } from './shared';
+
+type ExecutionStreamStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'disconnected';
 
 export function useChatController({
   runAsyncAction,
@@ -53,6 +71,20 @@ export function useChatController({
   >(null);
   const [subagentDetailErrorMessage, setSubagentDetailErrorMessage] =
     useState<string | null>(null);
+  const [executionStreamStatus, setExecutionStreamStatus] =
+    useState<ExecutionStreamStatus>('idle');
+  const [executionStreamErrorMessage, setExecutionStreamErrorMessage] =
+    useState<string | null>(null);
+  const [executionStreamReconnectAttempt, setExecutionStreamReconnectAttempt] =
+    useState(0);
+  const [runsState, dispatchRuns] = useReducer(
+    chatExecutionStateReducer,
+    undefined,
+    createInitialChatExecutionState,
+  );
+  const executionStreamReadyRef = useRef(false);
+  const activeSessionId = activeSession?.id || null;
+  const activeSessionKind = activeSession?.kind || null;
 
   const clearActiveSessionState = useCallback(() => {
     setActiveSession(null);
@@ -64,6 +96,10 @@ export function useChatController({
     setSubagentsErrorMessage(null);
     setSubagentDetailErrorMessage(null);
     setIsSubagentSheetOpen(false);
+    setExecutionStreamStatus('idle');
+    setExecutionStreamErrorMessage(null);
+    setExecutionStreamReconnectAttempt(0);
+    executionStreamReadyRef.current = false;
   }, []);
 
   const loadSessionsIndex = useCallback(
@@ -119,7 +155,7 @@ export function useChatController({
     async (
       session: SessionRecord,
       { silent = false }: { silent?: boolean } = {},
-    ) => {
+    ): Promise<SessionMessagesResponse | null> => {
       const response = await runAsyncAction(
         () => fetchSessionMessages(session.id),
         {
@@ -257,16 +293,22 @@ export function useChatController({
   );
 
   const refreshSessionContext = useCallback(
-    async (preferredSessionId?: string): Promise<SessionRecord | null> => {
+    async (preferredSessionId?: string): Promise<SessionMessagesResponse | null> => {
       const nextSession = await refreshSessionsAndSelection(preferredSessionId);
       if (!nextSession) {
         return null;
       }
 
-      await loadSession(nextSession, { silent: true });
-      return nextSession;
+      return loadSession(nextSession, { silent: true });
     },
     [loadSession, refreshSessionsAndSelection],
+  );
+
+  const refreshSessionIndexOnly = useCallback(
+    async (preferredSessionId?: string) => {
+      await refreshSessionsAndSelection(preferredSessionId);
+    },
+    [refreshSessionsAndSelection],
   );
 
   const adoptNewSession = useCallback((session: SessionRecord) => {
@@ -454,6 +496,87 @@ export function useChatController({
     return next.id;
   }, [activeSubagent, activeSubagentParentSessionId, handleOpenSubagent, subagents]);
 
+  const handleExecutionEvent = useCallback(
+    (event: SessionExecutionEvent) => {
+      dispatchRuns({
+        type: 'run/event-received',
+        sessionId: event.session_id,
+        event,
+      });
+
+      if (event.type.startsWith('subagent.')) {
+        void loadSubagents(event.session_id, { silent: true });
+      }
+
+      const isTerminalEvent =
+        event.type === 'message.completed' ||
+        event.type === 'execution.completed' ||
+        event.type === 'execution.failed';
+      if (!isTerminalEvent || !executionStreamReadyRef.current) {
+        return;
+      }
+
+      void refreshSessionIndexOnly(event.session_id);
+
+      if (event.type === 'message.completed' && event.data.message.content_text) {
+        return;
+      }
+
+      void refreshSessionContext(event.session_id);
+    },
+    [
+      loadSubagents,
+      refreshSessionContext,
+      refreshSessionIndexOnly,
+    ],
+  );
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionKind !== 'main') {
+      setExecutionStreamStatus('idle');
+      setExecutionStreamErrorMessage(null);
+      setExecutionStreamReconnectAttempt(0);
+      executionStreamReadyRef.current = false;
+      return undefined;
+    }
+
+    executionStreamReadyRef.current = false;
+    setExecutionStreamStatus('connecting');
+    setExecutionStreamErrorMessage(null);
+    setExecutionStreamReconnectAttempt(0);
+
+    const connection = connectSessionExecutionStream({
+      sessionId: activeSessionId,
+      onOpen: () => {
+        setExecutionStreamStatus('connected');
+        setExecutionStreamErrorMessage(null);
+        setExecutionStreamReconnectAttempt(0);
+      },
+      onEvent: handleExecutionEvent,
+      onReady: () => {
+        executionStreamReadyRef.current = true;
+      },
+      onError: (error) => {
+        executionStreamReadyRef.current = false;
+        setExecutionStreamStatus('disconnected');
+        setExecutionStreamErrorMessage(error.message);
+      },
+      onDisconnect: () => {
+        executionStreamReadyRef.current = false;
+        setExecutionStreamStatus('disconnected');
+      },
+      onReconnect: (attempt) => {
+        executionStreamReadyRef.current = false;
+        setExecutionStreamStatus('reconnecting');
+        setExecutionStreamReconnectAttempt(attempt);
+      },
+    });
+
+    return () => {
+      connection.close();
+    };
+  }, [activeSessionId, activeSessionKind, handleExecutionEvent]);
+
   const handleSendMessage = useCallback(
     async (afterSend?: (sessionId: string) => Promise<void>) => {
       const trimmed = draft.trim();
@@ -467,28 +590,67 @@ export function useChatController({
         return null;
       }
 
-      const sent = await runAsyncAction(
-        async () => {
-          setDraft('');
-          await sendSessionMessage(session.id, trimmed);
-          await refreshSessionContext(session.id);
-          if (afterSend) {
-            await afterSend(session.id);
-          }
-          return session;
-        },
+      const localRunId = `optimistic:${session.id}:${Date.now()}`;
+      dispatchRuns({
+        type: 'run/optimistic-created',
+        sessionId: session.id,
+        localRunId,
+        prompt: trimmed,
+        createdAt: new Date().toISOString(),
+      });
+
+      setDraft('');
+      const response = (await runAsyncAction(
+        async (): Promise<Partial<AgentExecutionAcceptedResponse> | undefined> =>
+          (await sendSessionMessageAsync(
+            session.id,
+            trimmed,
+          )) as Partial<AgentExecutionAcceptedResponse> | undefined,
         {
           setPending: setIsSending,
           errorMessage: 'Failed to send message.',
         },
-      );
+      )) as Partial<AgentExecutionAcceptedResponse> | null;
 
-      if (sent === null) {
+      if (response === null) {
+        dispatchRuns({
+          type: 'run/optimistic-discarded',
+          sessionId: session.id,
+          localRunId,
+        });
         setDraft(trimmed);
         return null;
       }
 
-      return sent;
+      dispatchRuns({
+        type: 'run/response-bound',
+        sessionId: session.id,
+        localRunId,
+        response,
+      });
+
+      try {
+        const refreshed = await refreshSessionContext(session.id);
+        if (refreshed === null) {
+          setErrorMessage('Message sent, but failed to refresh session context.');
+        }
+      } catch (error) {
+        setErrorMessage(
+          toErrorMessage(error, 'Message sent, but failed to refresh session context.'),
+        );
+      }
+
+      if (afterSend) {
+        try {
+          await afterSend(session.id);
+        } catch (error) {
+          setErrorMessage(
+            toErrorMessage(error, 'Message sent, but failed to refresh related views.'),
+          );
+        }
+      }
+
+      return session;
     },
     [draft, ensureSessionForSend, refreshSessionContext, runAsyncAction, setErrorMessage],
   );
@@ -496,6 +658,33 @@ export function useChatController({
   const activeSubagentIndex = activeSubagent
     ? subagents.findIndex((item) => item.id === activeSubagent.id)
     : -1;
+  const timelineItems = useMemo(
+    () =>
+      buildChatTimelineItems({
+        activeSessionId: activeSession?.id || null,
+        messages,
+        runsState,
+        subagents,
+      }),
+    [activeSession?.id, messages, runsState, subagents],
+  );
+  const liveRuns = useMemo(() => {
+    if (!activeSession) {
+      return [];
+    }
+
+    const runIds = runsState.sessionRunIds[activeSession.id] || [];
+    return runIds
+      .map((runId) => runsState.runsById[runId])
+      .filter((run): run is NonNullable<typeof run> => Boolean(run));
+  }, [activeSession, runsState.runsById, runsState.sessionRunIds]);
+  const hasActiveLiveRuns = liveRuns.some(
+    (run) =>
+      run.status === 'connecting' ||
+      run.status === 'running' ||
+      run.status === 'awaiting_approval' ||
+      run.status === 'disconnected',
+  );
 
   return {
     activeSession,
@@ -509,6 +698,10 @@ export function useChatController({
     cancellingSubagentId,
     clearActiveSessionState,
     draft,
+    executionStreamErrorMessage,
+    executionStreamReconnectAttempt,
+    executionStreamStatus,
+    hasActiveLiveRuns,
     handleCancelSubagent,
     handleCloseSubagent,
     handleCreateSession,
@@ -526,6 +719,7 @@ export function useChatController({
     isLoadingSubagents,
     isSending,
     isSubagentSheetOpen,
+    liveRuns,
     loadSession,
     loadSubagentDetail,
     loadSubagentMessages,
@@ -536,8 +730,13 @@ export function useChatController({
     sessions,
     setDraft,
     setIsSubagentSheetOpen,
+    shouldPollActiveSession:
+      Boolean(activeSession) &&
+      hasActiveLiveRuns &&
+      executionStreamStatus !== 'connected',
     subagentDetailErrorMessage,
     subagents,
     subagentsErrorMessage,
+    timelineItems,
   };
 }

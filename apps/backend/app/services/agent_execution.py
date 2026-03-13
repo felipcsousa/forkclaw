@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -11,7 +12,7 @@ from app.kernel.errors import KernelExecutionCancelledError
 from app.kernel.factory import create_agent_kernel
 from app.models.entities import Message, SessionRecord, Task, TaskRun
 from app.repositories.agent_execution import AgentExecutionRepository
-from app.schemas.execution import AgentExecutionResponse
+from app.schemas.execution import AgentExecutionAcceptedResponse, AgentExecutionResponse
 from app.services.execution_request_builder import ExecutionRequestBuilder
 from app.services.execution_result_persister import (
     ExecutionResultPersister,
@@ -69,47 +70,13 @@ class AgentExecutionService:
                 session_id=session_id,
                 title=title,
                 message=message,
+                async_mode=False,
             )
         )
 
-        try:
-            result = self._execute_request(prepared.request)
-        except Exception as exc:
-            error_message = str(exc)
-            self._commit_action(
-                lambda: self.result_persister.persist_task_state(
-                    agent_id=prepared.agent_id,
-                    task=prepared.task,
-                    task_run=prepared.task_run,
-                    session_id=prepared.session_record.id,
-                    status="failed",
-                    output_json=None,
-                    error_message=error_message,
-                    estimated_cost_usd=None,
-                    event_type="kernel.execution.failed",
-                    event_payload={
-                        "session_id": prepared.session_record.id,
-                        "task_id": prepared.task.id,
-                        "error": error_message,
-                    },
-                    event_level="error",
-                    event_summary="Agent execution failed.",
-                )
-            )
-            raise
-
-        persisted = self._commit_action(
-            lambda: self.result_persister.persist_result(
-                agent_id=prepared.agent_id,
-                task=prepared.task,
-                task_run=prepared.task_run,
-                session_record=prepared.session_record,
-                result=result,
-                skill_resolution_payload=self.request_builder.serialize_skill_resolution(
-                    prepared.request
-                ),
-                assistant_message_text=result.output_text,
-            )
+        persisted, result = self._run_prepared_execution(
+            prepared,
+            record_message_completed_event=False,
         )
         return AgentExecutionResponse(
             task_id=prepared.task.id,
@@ -125,6 +92,32 @@ class AgentExecutionService:
             model_name=result.model_name,
             tools_used=result.tools_used,
             finished_at=persisted.task_run.finished_at,
+        )
+
+    def enqueue_simple(
+        self,
+        *,
+        session_id: str | None,
+        title: str | None,
+        message: str,
+    ) -> AgentExecutionAcceptedResponse:
+        prepared = self._commit_action(
+            lambda: self._prepare_simple_execution(
+                session_id=session_id,
+                title=title,
+                message=message,
+                async_mode=True,
+            )
+        )
+        return AgentExecutionAcceptedResponse(
+            task_id=prepared.task.id,
+            task_run_id=prepared.task_run.id,
+            session_id=prepared.session_record.id,
+            user_message_id=prepared.user_message.id if prepared.user_message else "",
+            status=prepared.task_run.status,
+            events_url=(
+                f"/sessions/{prepared.session_record.id}/events?task_run_id={prepared.task_run.id}"
+            ),
         )
 
     def build_resume_request(
@@ -265,6 +258,7 @@ class AgentExecutionService:
         request: KernelExecutionRequest,
         result: KernelExecutionResult,
         assistant_message_text: str | None = None,
+        record_message_completed_event: bool = False,
     ) -> PersistedExecutionArtifacts:
         session_record = self._require_session(session_id)
         return self._commit_action(
@@ -276,6 +270,7 @@ class AgentExecutionService:
                 result=result,
                 skill_resolution_payload=self.request_builder.serialize_skill_resolution(request),
                 assistant_message_text=assistant_message_text,
+                record_message_completed_event=record_message_completed_event,
             )
         )
 
@@ -309,6 +304,7 @@ class AgentExecutionService:
         event_summary: str,
         event_payload: dict[str, object] | None = None,
         assistant_message_text: str | None = None,
+        record_message_completed_event: bool = False,
     ) -> PersistedExecutionArtifacts:
         session_record = self._require_session(session_id)
 
@@ -319,6 +315,14 @@ class AgentExecutionService:
                     session_record=session_record,
                     content=assistant_message_text,
                 )
+                if record_message_completed_event:
+                    self.result_persister.record_message_completed(
+                        agent_id=agent_id,
+                        session_record=session_record,
+                        task=task,
+                        task_run=task_run,
+                        message=assistant_message,
+                    )
             persisted_run = self.result_persister.persist_task_state(
                 agent_id=agent_id,
                 task=task,
@@ -361,6 +365,7 @@ class AgentExecutionService:
         session_id: str | None,
         title: str | None,
         message: str,
+        async_mode: bool,
     ) -> PreparedExecution:
         agent = self._require_default_agent()
         OperationalSettingsService(self.session).enforce_budget_limits(input_text=message)
@@ -375,16 +380,51 @@ class AgentExecutionService:
             agent.id,
             session_record.id,
             {"message": message, "user_message_id": user_message.id},
+            kind="agent_execution_async" if async_mode else "agent_execution",
+            status="queued" if async_mode else "running",
         )
-        task_run = self._repository.create_task_run(task.id)
-        self._repository.record_audit_event(
-            agent_id=agent.id,
-            event_type="kernel.execution.started",
-            entity_type="task_run",
-            entity_id=task_run.id,
-            payload={"session_id": session_record.id, "task_id": task.id},
-            summary_text="Agent execution started.",
+        task_run = self._repository.create_task_run(
+            task.id,
+            status="queued" if async_mode else "running",
+            started_at=None if async_mode else None,
         )
+        if async_mode:
+            self._repository.record_audit_event(
+                agent_id=agent.id,
+                event_type="message.user.accepted",
+                entity_type="message",
+                entity_id=user_message.id,
+                payload={
+                    "session_id": session_record.id,
+                    "task_id": task.id,
+                    "task_run_id": task_run.id,
+                    "message_id": user_message.id,
+                },
+                summary_text="User message accepted for async execution.",
+            )
+            self._repository.record_audit_event(
+                agent_id=agent.id,
+                event_type="assistant.run.created",
+                entity_type="task_run",
+                entity_id=task_run.id,
+                payload={
+                    "session_id": session_record.id,
+                    "task_id": task.id,
+                    "task_run_id": task_run.id,
+                    "user_message_id": user_message.id,
+                    "status": "queued",
+                },
+                summary_text="Async assistant run created.",
+            )
+        else:
+            self._repository.record_audit_event(
+                agent_id=agent.id,
+                event_type="kernel.execution.started",
+                entity_type="task_run",
+                entity_id=task_run.id,
+                payload={"session_id": session_record.id, "task_id": task.id},
+                summary_text="Agent execution started.",
+            )
         request = self.request_builder.build_simple(
             task=task,
             task_run=task_run,
@@ -405,6 +445,128 @@ class AgentExecutionService:
             request=request,
             user_message=user_message,
         )
+
+    def process_next_queued_execution(self) -> bool:
+        claimed = self._commit_action(self._repository.claim_next_queued_execution_run)
+        if claimed is None:
+            return False
+
+        task, task_run = claimed
+        payload = self._task_payload(task)
+        message_text = str(payload.get("message", "") or "")
+        trigger_message_id = payload.get("user_message_id")
+        if not isinstance(trigger_message_id, str) or not trigger_message_id:
+            msg = "Queued execution is missing its trigger message."
+            self._commit_action(
+                lambda: self.result_persister.persist_task_state(
+                    agent_id=task.agent_id,
+                    task=task,
+                    task_run=task_run,
+                    session_id=task.session_id,
+                    status="failed",
+                    output_json=None,
+                    error_message=msg,
+                    estimated_cost_usd=None,
+                    event_type="kernel.execution.failed",
+                    event_payload={"session_id": task.session_id, "task_id": task.id, "error": msg},
+                    event_level="error",
+                    event_summary="Agent execution failed.",
+                )
+            )
+            return True
+
+        session_record = self._require_session(task.session_id)
+        request = self.request_builder.build_simple(
+            task=task,
+            task_run=task_run,
+            session_record=session_record,
+            input_text=message_text,
+            trigger_message_id=trigger_message_id,
+        )
+        self._commit_action(
+            lambda: self._repository.record_audit_event(
+                agent_id=task.agent_id,
+                event_type="kernel.execution.started",
+                entity_type="task_run",
+                entity_id=task_run.id,
+                payload={
+                    "session_id": session_record.id,
+                    "task_id": task.id,
+                    "task_run_id": task_run.id,
+                },
+                summary_text="Agent execution started.",
+            )
+        )
+
+        prepared = PreparedExecution(
+            agent_id=task.agent_id,
+            session_record=session_record,
+            task=task,
+            task_run=task_run,
+            request=request,
+            user_message=self._repository.get_message(trigger_message_id),
+        )
+        self._run_prepared_execution(prepared, record_message_completed_event=True)
+        return True
+
+    def _run_prepared_execution(
+        self,
+        prepared: PreparedExecution,
+        *,
+        record_message_completed_event: bool,
+    ) -> tuple[PersistedExecutionArtifacts, KernelExecutionResult]:
+        try:
+            result = self._execute_request(prepared.request)
+        except Exception as exc:
+            error_message = str(exc)
+            self._commit_action(
+                lambda: self.result_persister.persist_task_state(
+                    agent_id=prepared.agent_id,
+                    task=prepared.task,
+                    task_run=prepared.task_run,
+                    session_id=prepared.session_record.id,
+                    status="failed",
+                    output_json=None,
+                    error_message=error_message,
+                    estimated_cost_usd=None,
+                    event_type="kernel.execution.failed",
+                    event_payload={
+                        "session_id": prepared.session_record.id,
+                        "task_id": prepared.task.id,
+                        "task_run_id": prepared.task_run.id,
+                        "error": error_message,
+                    },
+                    event_level="error",
+                    event_summary="Agent execution failed.",
+                )
+            )
+            raise
+
+        persisted = self._commit_action(
+            lambda: self.result_persister.persist_result(
+                agent_id=prepared.agent_id,
+                task=prepared.task,
+                task_run=prepared.task_run,
+                session_record=prepared.session_record,
+                result=result,
+                skill_resolution_payload=self.request_builder.serialize_skill_resolution(
+                    prepared.request
+                ),
+                assistant_message_text=result.output_text,
+                record_message_completed_event=record_message_completed_event,
+            )
+        )
+        return persisted, result
+
+    @staticmethod
+    def _task_payload(task: Task) -> dict[str, object]:
+        if not task.payload_json:
+            return {}
+        try:
+            payload = json.loads(task.payload_json)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _prepare_delegated_execution(
         self,

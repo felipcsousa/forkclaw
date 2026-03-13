@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.provider_catalog import ToolFormat
 from app.tools.base import LocalTool, ToolDescriptor, ToolExecutionContext, ToolResult
+from app.tools.shell import ShellExecTool
 from app.tools.web.fetch import fetch_web_document
 from app.tools.web.providers.brave import BraveWebSearchProvider
 
@@ -507,6 +508,7 @@ def build_tool_registry() -> ToolRegistry:
     registry.register(EditFileTool())
     registry.register(ClipboardReadTool())
     registry.register(ClipboardWriteTool())
+    registry.register(ShellExecTool())
     registry.register(WebSearchTool())
     registry.register(WebFetchTool())
     return registry

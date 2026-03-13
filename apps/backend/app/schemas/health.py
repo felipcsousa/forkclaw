@@ -35,6 +35,7 @@ class OperationalBacklogHealthResponse(BaseModel):
 
 class OperationalComponentsHealthResponse(BaseModel):
     scheduler: OperationalComponentHealthResponse
+    execution_worker: OperationalComponentHealthResponse
     subagent_worker: OperationalComponentHealthResponse
 
 

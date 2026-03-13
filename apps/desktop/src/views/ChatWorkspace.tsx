@@ -21,8 +21,11 @@ export function ChatWorkspace({
       <div className="min-h-0 flex-1 px-6 py-5">
         <ChatTimeline
           session={chat.activeSession}
-          messages={chat.messages}
+          timelineItems={chat.timelineItems}
           subagents={chat.subagents}
+          executionStreamStatus={chat.executionStreamStatus}
+          executionStreamReconnectAttempt={chat.executionStreamReconnectAttempt}
+          executionStreamErrorMessage={chat.executionStreamErrorMessage}
           isLoading={chat.isBootstrapping || chat.isLoadingMessages}
           isSending={chat.isSending}
           cancellingSubagentId={chat.cancellingSubagentId}

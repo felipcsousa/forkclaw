@@ -1,4 +1,5 @@
 export type {
+  AgentExecutionAcceptedResponse,
   ActivityAuditEventRecord,
   ActivityTimelineEntryRecord,
   ActivityTimelineEntryType,
@@ -56,3 +57,16 @@ export type {
   ToolRisk,
   ToolStatus,
 } from './legacy';
+export type {
+  SessionExecutionEvent,
+  SessionExecutionEventApprovalData,
+  SessionExecutionEventAssistantRunCreatedData,
+  SessionExecutionEventMessageCompletedData,
+  SessionExecutionEventMessagePayload,
+  SessionExecutionEventMessageUserAcceptedData,
+  SessionExecutionEventRunData,
+  SessionExecutionEventSubagentData,
+  SessionExecutionEventToolData,
+  SessionExecutionStreamConnection,
+  SessionExecutionStreamOptions,
+} from './sessionExecutionStream';
