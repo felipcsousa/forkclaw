@@ -84,6 +84,29 @@ def get_session_by_id(
     return SessionRead.model_validate(record)
 
 
+@router.post(
+    "/sessions/{session_id}/reset",
+    response_model=SessionRead,
+)
+def reset_session_conversation(
+    session_id: str,
+    session: Session = Depends(get_session),
+) -> SessionRead:
+    subagents = SubagentDelegationService(session)
+    try:
+        subagents.ensure_main_session_interaction_allowed(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+    service = AgentOSService(session)
+    try:
+        record = service.reset_session_conversation(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+    return SessionRead.model_validate(record)
+
+
 @router.get(
     "/sessions/{session_id}/messages",
     response_model=SessionMessagesResponse,

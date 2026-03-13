@@ -873,6 +873,7 @@ class SessionSubagentReadAdapter:
             "spawn_depth": session_record.spawn_depth,
             "title": session_record.title,
             "summary": session_record.summary,
+            "conversation_id": session_record.conversation_id,
             "status": session_record.status,
             "delegated_goal": session_record.delegated_goal,
             "delegated_context_snapshot": session_record.delegated_context_snapshot,

@@ -14,6 +14,7 @@ from app.kernel.contracts import (
 from app.models.entities import SessionRecord, Task, TaskRun, ToolPermission, utc_now
 from app.repositories.agent_execution import AgentExecutionRepository
 from app.services.operational_settings import OperationalSettingsService
+from app.services.prompt_context_service import PromptContextService
 from app.services.skills import SkillService
 
 
@@ -140,11 +141,15 @@ class ExecutionRequestBuilder:
 
         runtime_config = OperationalSettingsService(self.session).resolve_runtime_config(profile)
         if history_cutoff_sequence is None:
-            messages = self.repository.list_session_messages(session_record.id)
+            messages = self.repository.list_session_messages(
+                session_record.id,
+                conversation_id=session_record.conversation_id,
+            )
         else:
             messages = self.repository.list_session_messages_until(
                 session_record.id,
                 history_cutoff_sequence,
+                conversation_id=session_record.conversation_id,
             )
         settings = self.repository.list_settings()
         tool_permissions = (
@@ -162,6 +167,50 @@ class ExecutionRequestBuilder:
         if max_iterations_override is not None:
             runtime_settings["runtime.max_iterations_per_execution"] = str(max_iterations_override)
 
+        prompt_context_service = PromptContextService(self.session)
+        summary_cutoff_sequence = history_cutoff_sequence
+        if summary_cutoff_sequence is None and trigger_message_id is not None:
+            trigger_message = self.repository.get_message(trigger_message_id)
+            summary_cutoff_sequence = (
+                trigger_message.sequence_number if trigger_message is not None else None
+            )
+        summary_memory = prompt_context_service.update_conversation_summary(
+            agent_id=agent.id,
+            session_record=session_record,
+            cutoff_sequence=summary_cutoff_sequence,
+            parent_session_id=session_record.parent_session_id,
+        )
+        if summary_memory is not None:
+            self.repository.record_audit_event(
+                agent_id=agent.id,
+                event_type="conversation.summary.updated",
+                entity_type="memory",
+                entity_id=summary_memory.id,
+                payload={
+                    "session_id": session_record.id,
+                    "conversation_id": session_record.conversation_id,
+                },
+                summary_text="Conversation summary updated.",
+            )
+        prompt_context = prompt_context_service.build_context(
+            agent_id=agent.id,
+            session_record=session_record,
+            current_input=input_text,
+        )
+        self.repository.record_audit_event(
+            agent_id=agent.id,
+            event_type="prompt_context.resolved",
+            entity_type="task_run",
+            entity_id=task_run.id,
+            payload=self._serialize_prompt_context(prompt_context),
+            summary_text="Prompt context resolved.",
+        )
+
+        history_source = (
+            messages[:-1]
+            if (trigger_message_id is not None or history_cutoff_sequence is not None)
+            else messages
+        )
         history = [
             KernelMessage(
                 message_id=item.id,
@@ -170,7 +219,7 @@ class ExecutionRequestBuilder:
                 sequence_number=item.sequence_number,
                 created_at=item.created_at,
             )
-            for item in messages[:-1]
+            for item in history_source
         ]
 
         return KernelExecutionRequest(
@@ -200,6 +249,7 @@ class ExecutionRequestBuilder:
             ],
             session=KernelSessionState(
                 session_id=session_record.id,
+                conversation_id=session_record.conversation_id,
                 title=session_record.title,
                 messages=history,
             ),
@@ -214,7 +264,41 @@ class ExecutionRequestBuilder:
                 environment_overlay=skill_bundle.environment_overlay,
             ),
             input_text=input_text,
+            prompt_context=prompt_context,
         )
+
+    @staticmethod
+    def _serialize_prompt_context(prompt_context) -> dict[str, object]:
+        return {
+            "layers": [
+                {
+                    "key": layer.key,
+                    "budget_chars": layer.budget_chars,
+                    "used_chars": layer.used_chars,
+                }
+                for layer in prompt_context.layers
+            ],
+            "included": [
+                {
+                    "memory_id": item.memory_id,
+                    "namespace": item.namespace,
+                    "memory_key": item.memory_key,
+                    "layer": item.layer,
+                    "reason": item.reason,
+                }
+                for item in prompt_context.included
+            ],
+            "excluded": [
+                {
+                    "memory_id": item.memory_id,
+                    "namespace": item.namespace,
+                    "memory_key": item.memory_key,
+                    "layer": item.layer,
+                    "reason": item.reason,
+                }
+                for item in prompt_context.excluded
+            ],
+        }
 
     @staticmethod
     def build_delegated_input(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -17,6 +18,8 @@ from app.kernel.contracts import (
     KernelExecutionRequest,
     KernelIdentity,
     KernelMessage,
+    KernelPromptContext,
+    KernelPromptContextLayer,
     KernelRuntime,
     KernelSessionState,
     KernelSkill,
@@ -59,6 +62,7 @@ def _build_request(
         tools=tools or [],
         session=KernelSessionState(
             session_id="session-1",
+            conversation_id="conversation-1",
             title="Test",
             messages=history or [],
         ),
@@ -72,6 +76,7 @@ def _build_request(
             settings={},
             started_at=datetime.now(UTC),
         ),
+        prompt_context=KernelPromptContext(),
         input_text=input_text,
     )
 
@@ -236,6 +241,35 @@ def test_prompt_builder_reports_absence_of_selected_skills_but_keeps_resolution_
 
     assert "Strategy: all_eligible" in prompt
     assert "No eligible skills are active for this execution." in prompt
+
+
+def test_prompt_builder_renders_prompt_context_before_skills() -> None:
+    request = replace(
+        _build_request(
+            provider="product_echo",
+            model_name="product-echo/simple",
+        ),
+        prompt_context=KernelPromptContext(
+            layers=[
+                KernelPromptContextLayer(
+                    key="stable_manual",
+                    title="Stable Manual Memory",
+                    budget_chars=2000,
+                    used_chars=26,
+                    content="Remember the manual rule.",
+                )
+            ]
+        ),
+    )
+
+    prompt = NanobotPromptBuilder.build_system_prompt(request)
+
+    context_index = prompt.index("# Context")
+    skills_index = prompt.index("# Skills")
+
+    assert context_index < skills_index
+    assert "## Stable Manual Memory" in prompt
+    assert "Remember the manual rule." in prompt
 
 
 def test_build_provider_uses_native_kimi_provider() -> None:

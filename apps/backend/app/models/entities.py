@@ -88,6 +88,10 @@ class SessionRecord(TimestampedModel, table=True):
     spawn_depth: int = Field(default=0, nullable=False)
     title: str = Field(sa_column=Column(String(200), nullable=False))
     summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    conversation_id: str = Field(
+        default_factory=generate_id,
+        sa_column=Column(String(36), nullable=False, index=True),
+    )
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False, index=True))
     delegated_goal: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     delegated_context_snapshot: str | None = Field(
@@ -162,6 +166,9 @@ class Message(TimestampedModel, table=True):
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
     session_id: str = Field(foreign_key="sessions.id", max_length=36, nullable=False)
+    conversation_id: str = Field(
+        sa_column=Column(String(36), nullable=False, index=True),
+    )
     role: str = Field(sa_column=Column(String(50), nullable=False, index=True))
     status: str = Field(default="committed", sa_column=Column(String(50), nullable=False))
     sequence_number: int = Field(nullable=False)
@@ -270,13 +277,43 @@ class CronJob(TimestampedModel, table=True):
 class Memory(TimestampedModel, table=True):
     __tablename__ = "memories"
 
-    __table_args__ = (UniqueConstraint("agent_id", "namespace", "memory_key"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_id",
+            "namespace",
+            "memory_key",
+            "memory_class",
+            "scope_kind",
+            "scope_ref",
+            "source",
+        ),
+    )
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
     agent_id: str = Field(foreign_key="agents.id", max_length=36, nullable=False)
     namespace: str = Field(default="default", sa_column=Column(String(100), nullable=False))
     memory_key: str = Field(sa_column=Column(String(150), nullable=False))
     value_text: str = Field(sa_column=Column(Text, nullable=False))
+    memory_class: str = Field(default="stable", sa_column=Column(String(50), nullable=False))
+    scope_kind: str = Field(default="agent", sa_column=Column(String(50), nullable=False))
+    scope_ref: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+    session_id: str | None = Field(default=None, foreign_key="sessions.id", max_length=36)
+    conversation_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(36), nullable=True, index=True),
+    )
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+    )
+    source_memory_id: str | None = Field(
+        default=None,
+        foreign_key="memories.id",
+        max_length=36,
+        nullable=True,
+    )
     source: str = Field(default="manual", sa_column=Column(String(100), nullable=False))
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False))
 

@@ -16,6 +16,7 @@ class MessageRead(BaseModel):
 
     id: str
     session_id: str
+    conversation_id: str
     role: str
     status: str
     sequence_number: int

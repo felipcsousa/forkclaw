@@ -62,6 +62,7 @@ def test_schema_and_migrations_create_required_tables(test_client) -> None:
     memory_change_columns = {
         column["name"] for column in inspector.get_columns("memory_change_log")
     }
+    message_columns = {column["name"] for column in inspector.get_columns("messages")}
 
     assert {"duration_ms", "estimated_cost_usd"} <= task_runs_columns
     assert {"level", "summary_text"} <= audit_events_columns
@@ -71,6 +72,7 @@ def test_schema_and_migrations_create_required_tables(test_client) -> None:
         "parent_session_id",
         "root_session_id",
         "spawn_depth",
+        "conversation_id",
         "delegated_goal",
         "delegated_context_snapshot",
         "tool_profile",
@@ -153,6 +155,7 @@ def test_schema_and_migrations_create_required_tables(test_client) -> None:
         "before_snapshot",
         "after_snapshot",
     } <= memory_change_columns
+    assert {"conversation_id"} <= message_columns
 
     session_indexes = {index["name"] for index in inspector.get_indexes("sessions")}
     subagent_run_indexes = {
@@ -274,6 +277,7 @@ def test_subagent_migration_backfills_legacy_sessions(tmp_path, monkeypatch) -> 
     assert row["parent_session_id"] is None
     assert row["root_session_id"] == "session-1"
     assert row["spawn_depth"] == 0
+    assert row["conversation_id"] == "session-1"
 
 
 def test_memory_v1_migration_backfills_legacy_memories(tmp_path, monkeypatch) -> None:

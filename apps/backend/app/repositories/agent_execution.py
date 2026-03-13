@@ -17,6 +17,7 @@ from app.models.entities import (
     ToolCall,
     ToolPermission,
     ensure_utc,
+    generate_id,
     utc_now,
 )
 
@@ -66,6 +67,7 @@ class AgentExecutionRepository:
             status="active",
             root_session_id=None,
             spawn_depth=0,
+            conversation_id=generate_id(),
             started_at=utc_now(),
         )
         record.root_session_id = record.id
@@ -73,18 +75,24 @@ class AgentExecutionRepository:
         self.session.flush()
         return record
 
-    def list_session_messages(self, session_id: str) -> list[Message]:
-        statement = (
-            select(Message)
-            .where(Message.session_id == session_id)
-            .order_by(Message.sequence_number.asc())
-        )
+    def list_session_messages(
+        self,
+        session_id: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> list[Message]:
+        statement = select(Message).where(Message.session_id == session_id)
+        if conversation_id is not None:
+            statement = statement.where(Message.conversation_id == conversation_id)
+        statement = statement.order_by(Message.sequence_number.asc())
         return list(self.session.exec(statement))
 
     def list_session_messages_until(
         self,
         session_id: str,
         sequence_number: int,
+        *,
+        conversation_id: str | None = None,
     ) -> list[Message]:
         statement = (
             select(Message)
@@ -92,11 +100,17 @@ class AgentExecutionRepository:
                 Message.session_id == session_id,
                 Message.sequence_number <= sequence_number,
             )
-            .order_by(Message.sequence_number.asc())
         )
+        if conversation_id is not None:
+            statement = statement.where(Message.conversation_id == conversation_id)
+        statement = statement.order_by(Message.sequence_number.asc())
         return list(self.session.exec(statement))
 
     def create_message(self, session_id: str, role: str, content: str) -> Message:
+        session_record = self.get_session(session_id)
+        if session_record is None:
+            msg = "Session not found."
+            raise ValueError(msg)
         statement = (
             select(Message)
             .where(Message.session_id == session_id)
@@ -106,6 +120,7 @@ class AgentExecutionRepository:
         sequence = (latest.sequence_number if latest else 0) + 1
         message = Message(
             session_id=session_id,
+            conversation_id=session_record.conversation_id,
             role=role,
             status="committed",
             sequence_number=sequence,
