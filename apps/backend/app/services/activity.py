@@ -47,6 +47,7 @@ PUBLIC_TOOL_EVENT_TYPES = {
 @dataclass
 class ActivityPreloadContext:
     user_messages_by_id: dict[str, Message]
+    fallback_user_messages_by_task_id: dict[str, Message]
     assistant_messages_by_session: dict[str, list[Message]]
     tool_calls_by_task_run: dict[str, list[ToolCall]]
     approvals_by_task: dict[str, list[Approval]]
@@ -97,6 +98,7 @@ class ActivityService:
         if not rows:
             return ActivityPreloadContext(
                 user_messages_by_id={},
+                fallback_user_messages_by_task_id={},
                 assistant_messages_by_session={},
                 tool_calls_by_task_run={},
                 approvals_by_task={},
@@ -116,6 +118,13 @@ class ActivityService:
             if isinstance(user_message_id, str)
         ]
         user_messages_by_id = self.repository.list_messages_by_ids(user_message_ids)
+        fallback_user_messages_by_task_id = self.repository.list_latest_user_messages_for_tasks(
+            [
+                task
+                for _task_run, task, _session, _cron in rows
+                if not isinstance(payloads_by_task_id[task.id].get("user_message_id"), str)
+            ]
+        )
 
         session_ids = [
             session_record.id
@@ -163,6 +172,7 @@ class ActivityService:
 
         return ActivityPreloadContext(
             user_messages_by_id=user_messages_by_id,
+            fallback_user_messages_by_task_id=fallback_user_messages_by_task_id,
             assistant_messages_by_session=assistant_messages_by_session,
             tool_calls_by_task_run=tool_calls_by_task_run,
             approvals_by_task=approvals_by_task,
@@ -185,7 +195,7 @@ class ActivityService:
         if isinstance(user_message_id, str):
             user_message = context.user_messages_by_id.get(user_message_id)
         if user_message is None:
-            user_message = self.repository.find_user_message_for_task(task)
+            user_message = context.fallback_user_messages_by_task_id.get(task.id)
 
         assistant_messages = self._assistant_messages_for_task(
             task,

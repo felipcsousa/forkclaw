@@ -13,6 +13,10 @@ from app.schemas.memory import (
     MemoryEntryUpdate,
     MemoryHistoryItemRead,
     MemoryHistoryResponse,
+    MemoryRecallPreviewResponse,
+    MemoryScopeName,
+    MemoryScopesResponse,
+    MemorySearchResponse,
 )
 from app.services.memory_admin_service import (
     MemoryAdminService,
@@ -21,6 +25,7 @@ from app.services.memory_admin_service import (
     MemoryHardDeleteDisabledError,
     MemoryManualCrudDisabledError,
 )
+from app.services.memory_search_service import MemorySearchService
 
 router = APIRouter(tags=["memory"])
 
@@ -161,7 +166,8 @@ def unhide_memory_entry(memory_id: str, session: Session = Depends(get_session))
 
 @router.post("/memory/entries/{memory_id}/promote", response_model=MemoryEntryRead)
 def promote_memory_entry(
-    memory_id: str, session: Session = Depends(get_session)
+    memory_id: str,
+    session: Session = Depends(get_session),
 ) -> MemoryEntryRead:
     service = MemoryAdminService(session)
     try:
@@ -183,7 +189,8 @@ def demote_memory_entry(memory_id: str, session: Session = Depends(get_session))
 
 @router.post("/memory/entries/{memory_id}/restore", response_model=MemoryEntryRead)
 def restore_memory_entry(
-    memory_id: str, session: Session = Depends(get_session)
+    memory_id: str,
+    session: Session = Depends(get_session),
 ) -> MemoryEntryRead:
     service = MemoryAdminService(session)
     try:
@@ -206,3 +213,52 @@ def list_memory_history(
     return MemoryHistoryResponse(
         items=[MemoryHistoryItemRead.model_validate(item) for item in items]
     )
+
+
+@router.get("/memory/search", response_model=MemorySearchResponse)
+def search_memory(
+    q: str = Query(min_length=1),
+    session_id: str | None = Query(default=None),
+    scope: list[MemoryScopeName] | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> MemorySearchResponse:
+    service = MemorySearchService(session)
+    try:
+        return service.search(q=q, session_id=session_id, scopes=scope, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.get("/memory/recall/preview", response_model=MemoryRecallPreviewResponse)
+def preview_memory_recall(
+    q: str = Query(min_length=1),
+    session_id: str | None = Query(default=None),
+    scope: list[MemoryScopeName] | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    run_id: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+) -> MemoryRecallPreviewResponse:
+    service = MemorySearchService(session)
+    try:
+        return service.recall_preview(
+            q=q,
+            session_id=session_id,
+            scopes=scope,
+            limit=limit,
+            run_id=run_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc
+
+
+@router.get("/memory/scopes", response_model=MemoryScopesResponse)
+def list_memory_scopes(
+    session_id: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+) -> MemoryScopesResponse:
+    service = MemorySearchService(session)
+    try:
+        return service.list_scopes(session_id=session_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _memory_http_exception(exc) from exc

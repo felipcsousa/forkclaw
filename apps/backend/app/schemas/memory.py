@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -53,10 +53,12 @@ class MemoryEntryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    agent_id: str | None = None
     scope_type: str
     scope_key: str
     conversation_id: str | None
     session_id: str | None
+    root_session_id: str | None = None
     parent_session_id: str | None
     source_kind: str
     lifecycle_state: str
@@ -70,11 +72,16 @@ class MemoryEntryRead(BaseModel):
     updated_at: datetime
     created_by: str
     updated_by: str
+    workspace_path: str | None = None
+    user_scope_key: str | None = None
     expires_at: datetime | None
     redaction_state: str
     security_state: str
     hidden_from_recall: bool
     deleted_at: datetime | None
+    origin_message_id: str | None = None
+    origin_task_run_id: str | None = None
+    override_target_entry_id: str | None = None
 
 
 class MemoryEntriesListResponse(BaseModel):
@@ -98,3 +105,76 @@ class MemoryHistoryResponse(BaseModel):
 
 class MemoryDeleteResponse(BaseModel):
     deleted: bool
+
+
+MemoryScopeName = Literal[
+    "current_conversation",
+    "current_session_tree",
+    "agent",
+    "user",
+    "workspace",
+]
+MemoryRecordType = Literal["memory_entry", "session_summary"]
+MemoryOverrideStatus = Literal["none", "overrides_automatic", "overridden_by_manual"]
+
+
+class MemoryScopeContextRead(BaseModel):
+    agent_id: str | None
+    session_id: str | None
+    root_session_id: str | None
+    workspace_path: str | None
+    user_scope_key: str | None
+
+
+class MemoryScopeSupportRead(BaseModel):
+    name: MemoryScopeName
+    available: bool
+
+
+class MemoryOriginRead(BaseModel):
+    table: str
+    agent_id: str | None
+    session_id: str | None
+    root_session_id: str | None
+    origin_message_id: str | None
+    origin_task_run_id: str | None
+    workspace_path: str | None
+    matched_scopes: list[MemoryScopeName] = Field(default_factory=list)
+
+
+class MemoryOverrideRead(BaseModel):
+    status: MemoryOverrideStatus
+    target_id: str | None = None
+    effective_id: str | None = None
+    selected_via_substitution: bool = False
+
+
+class MemoryItemRead(BaseModel):
+    record_type: MemoryRecordType
+    id: str
+    summary: str | None
+    body: str | None
+    source_kind: str
+    importance: float
+    score: float
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    origin: MemoryOriginRead
+    override: MemoryOverrideRead
+
+
+class MemorySearchResponse(BaseModel):
+    query: str
+    normalized_query: str
+    applied_scopes: list[MemoryScopeName]
+    context: MemoryScopeContextRead
+    items: list[MemoryItemRead]
+
+
+class MemoryRecallPreviewResponse(MemorySearchResponse):
+    run_id: str | None = None
+
+
+class MemoryScopesResponse(BaseModel):
+    context: MemoryScopeContextRead
+    default_scopes: list[MemoryScopeName]
+    supported_scopes: list[MemoryScopeSupportRead]

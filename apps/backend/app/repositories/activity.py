@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
@@ -73,6 +73,46 @@ class ActivityRepository:
             .order_by(Message.created_at.desc())
         )
         return self.session.exec(statement).first()
+
+    def list_latest_user_messages_for_tasks(
+        self,
+        tasks: list[Task],
+    ) -> dict[str, Message]:
+        task_ids = [task.id for task in tasks if task.session_id is not None]
+        if not task_ids:
+            return {}
+
+        ranked_messages = (
+            select(
+                Task.id.label("task_id"),
+                Message.id.label("message_id"),
+                func.row_number()
+                .over(
+                    partition_by=Task.id,
+                    order_by=(Message.created_at.desc(), Message.id.desc()),
+                )
+                .label("row_number"),
+            )
+            .join(
+                Message,
+                and_(
+                    Message.session_id == Task.session_id,
+                    Message.role == "user",
+                    Message.created_at <= Task.created_at,
+                ),
+            )
+            .where(Task.id.in_(task_ids))
+            .subquery()
+        )
+        statement = (
+            select(ranked_messages.c.task_id, Message)
+            .join(Message, Message.id == ranked_messages.c.message_id)
+            .where(ranked_messages.c.row_number == 1)
+        )
+        return {
+            task_id: message
+            for task_id, message in self.session.exec(statement)
+        }
 
     def list_assistant_messages_for_sessions(
         self,
