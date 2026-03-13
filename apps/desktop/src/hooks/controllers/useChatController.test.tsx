@@ -50,6 +50,8 @@ function createRunAsyncAction() {
     options.setPending?.(true);
     try {
       return await action();
+    } catch {
+      return null;
     } finally {
       options.setPending?.(false);
     }
@@ -277,6 +279,175 @@ describe('useChatController', () => {
           assistantMessageId: 'message-2',
         }),
       );
+    });
+  });
+
+  it('suppresses refresh side effects during replay and resumes them after stream.ready', async () => {
+    const runAsyncAction = createRunAsyncAction();
+    const setErrorMessage = vi.fn();
+    const session = {
+      id: 'session-1',
+      title: 'Persistent Chat',
+      kind: 'main',
+    };
+
+    mockFetchSessions.mockResolvedValue({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        runAsyncAction,
+        setErrorMessage,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.bootstrap();
+    });
+
+    expect(mockFetchSessions).toHaveBeenCalledTimes(1);
+    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      capturedStreamOptions?.onOpen?.();
+      capturedStreamOptions?.onEvent({
+        id: 'evt-replay-1',
+        type: 'execution.completed',
+        session_id: 'session-1',
+        task_id: 'task-1',
+        task_run_id: 'run-1',
+        created_at: '2026-03-12T13:00:03Z',
+        data: {
+          status: 'completed',
+          started_at: '2026-03-12T13:00:00Z',
+          finished_at: '2026-03-12T13:00:03Z',
+        },
+        raw: {},
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.liveRuns[0]?.status).toBe('completed');
+    });
+    expect(mockFetchSessions).toHaveBeenCalledTimes(1);
+    expect(mockFetchSessionMessages).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      capturedStreamOptions?.onReady?.();
+    });
+
+    act(() => {
+      capturedStreamOptions?.onEvent({
+        id: 'evt-live-1',
+        type: 'execution.failed',
+        session_id: 'session-1',
+        task_id: 'task-2',
+        task_run_id: 'run-2',
+        created_at: '2026-03-12T13:00:04Z',
+        data: {
+          status: 'failed',
+          error_message: 'boom',
+          started_at: '2026-03-12T13:00:00Z',
+          finished_at: '2026-03-12T13:00:04Z',
+        },
+        raw: {},
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockFetchSessions).toHaveBeenCalledTimes(3);
+      expect(mockFetchSessionMessages).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('keeps the accepted run when post-send refresh fails', async () => {
+    const runAsyncAction = createRunAsyncAction();
+    const setErrorMessage = vi.fn();
+    const session = {
+      id: 'session-1',
+      title: 'Persistent Chat',
+      kind: 'main',
+    };
+
+    mockFetchSessions
+      .mockResolvedValueOnce({ items: [session] })
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
+    mockSendSessionMessageAsync.mockResolvedValue({
+      task_id: 'task-1',
+      task_run_id: 'run-1',
+      session_id: 'session-1',
+      user_message_id: 'message-1',
+      status: 'queued',
+      events_url: '/sessions/session-1/events?task_run_id=run-1',
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        runAsyncAction,
+        setErrorMessage,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.bootstrap();
+    });
+
+    act(() => {
+      result.current.setDraft('Run once.');
+    });
+
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+
+    await waitFor(() => {
+      expect(mockSendSessionMessageAsync).toHaveBeenCalledWith('session-1', 'Run once.');
+      expect(result.current.draft).toBe('');
+      expect(result.current.liveRuns).toHaveLength(1);
+      expect(result.current.liveRuns[0]?.taskRunId).toBe('run-1');
+    });
+    expect(setErrorMessage).toHaveBeenCalled();
+  });
+
+  it('removes the optimistic run when async send fails before acceptance', async () => {
+    const runAsyncAction = createRunAsyncAction();
+    const setErrorMessage = vi.fn();
+    const session = {
+      id: 'session-1',
+      title: 'Persistent Chat',
+      kind: 'main',
+    };
+
+    mockFetchSessions.mockResolvedValue({ items: [session] });
+    mockFetchSessionMessages.mockResolvedValue({ session, items: [] });
+    mockFetchSessionSubagents.mockResolvedValue({ items: [] });
+    mockSendSessionMessageAsync.mockRejectedValue(new Error('send failed'));
+
+    const { result } = renderHook(() =>
+      useChatController({
+        runAsyncAction,
+        setErrorMessage,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.bootstrap();
+    });
+
+    act(() => {
+      result.current.setDraft('Retry me.');
+    });
+
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+
+    await waitFor(() => {
+      expect(result.current.draft).toBe('Retry me.');
+      expect(result.current.liveRuns).toHaveLength(0);
     });
   });
 });

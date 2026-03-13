@@ -89,6 +89,7 @@ export interface SessionExecutionStreamOptions {
   sessionId: string;
   onOpen?: () => void;
   onEvent: (event: SessionExecutionEvent) => void;
+  onReady?: () => void;
   onError?: (error: Error) => void;
   onDisconnect?: (error?: Error) => void;
   onReconnect?: (attempt: number, delayMs: number) => void;
@@ -212,6 +213,25 @@ function normalizeSessionExecutionEvent(frame: EventFrame): SessionExecutionEven
   } as SessionExecutionEvent;
 }
 
+function isStreamReadyFrame(frame: EventFrame, sessionId: string) {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(frame.data);
+  } catch {
+    return false;
+  }
+
+  const record = asRecord(parsed);
+  if (!record) {
+    return false;
+  }
+
+  const type = asString(record.type) || frame.eventName;
+  const eventSessionId = asString(record.session_id);
+  return type === 'stream.ready' && eventSessionId === sessionId;
+}
+
 async function consumeEventStream(
   response: Response,
   options: SessionExecutionStreamOptions,
@@ -244,6 +264,10 @@ async function consumeEventStream(
     for (const frameText of frames) {
       const frame = buildEventFrame(frameText);
       if (!frame) {
+        continue;
+      }
+      if (isStreamReadyFrame(frame, options.sessionId)) {
+        options.onReady?.();
         continue;
       }
       const event = normalizeSessionExecutionEvent(frame);

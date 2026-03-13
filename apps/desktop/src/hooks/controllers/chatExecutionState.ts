@@ -74,6 +74,11 @@ export type ChatExecutionAction =
       response: RunResponse;
     }
   | {
+      type: 'run/optimistic-discarded';
+      sessionId: string;
+      localRunId: string;
+    }
+  | {
       type: 'run/event-received';
       sessionId: string;
       event: SessionExecutionEvent;
@@ -570,6 +575,33 @@ export function chatExecutionStateReducer(
       }
 
       return nextState;
+    }
+    case 'run/optimistic-discarded': {
+      const existingRun = state.runsById[action.localRunId];
+      if (!existingRun) {
+        return state;
+      }
+
+      const runsById = Object.fromEntries(
+        Object.entries(state.runsById).filter(([runId]) => runId !== action.localRunId),
+      );
+      const sessionRunIds = {
+        ...state.sessionRunIds,
+        [action.sessionId]: (state.sessionRunIds[action.sessionId] || []).filter(
+          (runId) => runId !== action.localRunId,
+        ),
+      };
+      const runIdByTaskRunId = Object.fromEntries(
+        Object.entries(state.runIdByTaskRunId).filter(
+          ([, runId]) => runId !== action.localRunId,
+        ),
+      );
+
+      return {
+        runsById,
+        sessionRunIds,
+        runIdByTaskRunId,
+      };
     }
     case 'run/event-received': {
       const existingRunId = action.event.task_run_id

@@ -101,6 +101,7 @@ describe('connectSessionExecutionStream', () => {
   it('reconnects with Last-Event-ID and suppresses replayed events', async () => {
     const reconnects: number[] = [];
     const events: SessionExecutionEvent[] = [];
+    const readyCalls: number[] = [];
 
     globalThis.fetch = vi
       .fn()
@@ -110,6 +111,8 @@ describe('connectSessionExecutionStream', () => {
             'id: evt-1\n',
             'event: execution.started\n',
             'data: {"id":"evt-1","type":"execution.started","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:01Z","data":{"status":"running","started_at":"2026-03-12T13:00:01Z","finished_at":null}}\n\n',
+            'event: stream.ready\n',
+            'data: {"type":"stream.ready","session_id":"session-1","data":{"phase":"live"}}\n\n',
           ]),
           {
             status: 200,
@@ -128,6 +131,8 @@ describe('connectSessionExecutionStream', () => {
             'id: evt-2\n',
             'event: execution.completed\n',
             'data: {"id":"evt-2","type":"execution.completed","session_id":"session-1","task_run_id":"run-2","created_at":"2026-03-12T13:00:02Z","data":{"status":"completed","started_at":"2026-03-12T13:00:01Z","finished_at":"2026-03-12T13:00:02Z"}}\n\n',
+            'event: stream.ready\n',
+            'data: {"type":"stream.ready","session_id":"session-1","data":{"phase":"live"}}\n\n',
           ]),
           {
             status: 200,
@@ -142,12 +147,15 @@ describe('connectSessionExecutionStream', () => {
       sessionId: 'session-1',
       onEvent: (event) => {
         events.push(event);
-        if (events.length === 2) {
-          connection.close();
-        }
       },
       onReconnect: (attempt) => {
         reconnects.push(attempt);
+      },
+      onReady: () => {
+        readyCalls.push(events.length);
+        if (readyCalls.length === 2) {
+          connection.close();
+        }
       },
     });
 
@@ -155,6 +163,7 @@ describe('connectSessionExecutionStream', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(reconnects).toEqual([1]);
+    expect(readyCalls).toEqual([1, 2]);
     const secondHeaders = (vi.mocked(globalThis.fetch).mock.calls[1]?.[1]?.headers ??
       new Headers()) as Headers;
     expect(secondHeaders.get('Last-Event-ID')).toBe('evt-1');

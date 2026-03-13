@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import {
   cancelSessionSubagent,
@@ -82,6 +82,7 @@ export function useChatController({
     undefined,
     createInitialChatExecutionState,
   );
+  const executionStreamReadyRef = useRef(false);
   const activeSessionId = activeSession?.id || null;
   const activeSessionKind = activeSession?.kind || null;
 
@@ -98,6 +99,7 @@ export function useChatController({
     setExecutionStreamStatus('idle');
     setExecutionStreamErrorMessage(null);
     setExecutionStreamReconnectAttempt(0);
+    executionStreamReadyRef.current = false;
   }, []);
 
   const loadSessionsIndex = useCallback(
@@ -510,7 +512,7 @@ export function useChatController({
         event.type === 'message.completed' ||
         event.type === 'execution.completed' ||
         event.type === 'execution.failed';
-      if (!isTerminalEvent) {
+      if (!isTerminalEvent || !executionStreamReadyRef.current) {
         return;
       }
 
@@ -534,9 +536,11 @@ export function useChatController({
       setExecutionStreamStatus('idle');
       setExecutionStreamErrorMessage(null);
       setExecutionStreamReconnectAttempt(0);
+      executionStreamReadyRef.current = false;
       return undefined;
     }
 
+    executionStreamReadyRef.current = false;
     setExecutionStreamStatus('connecting');
     setExecutionStreamErrorMessage(null);
     setExecutionStreamReconnectAttempt(0);
@@ -549,14 +553,20 @@ export function useChatController({
         setExecutionStreamReconnectAttempt(0);
       },
       onEvent: handleExecutionEvent,
+      onReady: () => {
+        executionStreamReadyRef.current = true;
+      },
       onError: (error) => {
+        executionStreamReadyRef.current = false;
         setExecutionStreamStatus('disconnected');
         setExecutionStreamErrorMessage(error.message);
       },
       onDisconnect: () => {
+        executionStreamReadyRef.current = false;
         setExecutionStreamStatus('disconnected');
       },
       onReconnect: (attempt) => {
+        executionStreamReadyRef.current = false;
         setExecutionStreamStatus('reconnecting');
         setExecutionStreamReconnectAttempt(attempt);
       },
@@ -589,39 +599,58 @@ export function useChatController({
         createdAt: new Date().toISOString(),
       });
 
-      const sent = await runAsyncAction(
-        async (): Promise<SessionRecord> => {
-          setDraft('');
-          const response = (await sendSessionMessageAsync(
+      setDraft('');
+      const response = (await runAsyncAction(
+        async (): Promise<Partial<AgentExecutionAcceptedResponse> | undefined> =>
+          (await sendSessionMessageAsync(
             session.id,
             trimmed,
-          )) as Partial<AgentExecutionAcceptedResponse> | undefined;
-          if (response) {
-            dispatchRuns({
-              type: 'run/response-bound',
-              sessionId: session.id,
-              localRunId,
-              response,
-            });
-          }
-          await refreshSessionContext(session.id);
-          if (afterSend) {
-            await afterSend(session.id);
-          }
-          return session;
-        },
+          )) as Partial<AgentExecutionAcceptedResponse> | undefined,
         {
           setPending: setIsSending,
           errorMessage: 'Failed to send message.',
         },
-      );
+      )) as Partial<AgentExecutionAcceptedResponse> | null;
 
-      if (sent === null) {
+      if (response === null) {
+        dispatchRuns({
+          type: 'run/optimistic-discarded',
+          sessionId: session.id,
+          localRunId,
+        });
         setDraft(trimmed);
         return null;
       }
 
-      return sent;
+      dispatchRuns({
+        type: 'run/response-bound',
+        sessionId: session.id,
+        localRunId,
+        response,
+      });
+
+      try {
+        const refreshed = await refreshSessionContext(session.id);
+        if (refreshed === null) {
+          setErrorMessage('Message sent, but failed to refresh session context.');
+        }
+      } catch (error) {
+        setErrorMessage(
+          toErrorMessage(error, 'Message sent, but failed to refresh session context.'),
+        );
+      }
+
+      if (afterSend) {
+        try {
+          await afterSend(session.id);
+        } catch (error) {
+          setErrorMessage(
+            toErrorMessage(error, 'Message sent, but failed to refresh related views.'),
+          );
+        }
+      }
+
+      return session;
     },
     [draft, ensureSessionForSend, refreshSessionContext, runAsyncAction, setErrorMessage],
   );
