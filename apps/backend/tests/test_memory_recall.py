@@ -50,8 +50,15 @@ def _insert_memory_entry(
     hidden_from_recall: bool = False,
     deleted_at=None,
     override_target_entry_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> MemoryEntry:
     with get_db_session() as session:
+        resolved_conversation_id = conversation_id
+        if resolved_conversation_id is None and session_id is not None:
+            session_record = session.get(SessionRecord, session_id)
+            resolved_conversation_id = (
+                session_record.conversation_id if session_record is not None else None
+            )
         normalized_source = "autosaved" if source_kind == "automatic" else source_kind
         resolved_scope_type = "episodic" if session_id is not None else "stable"
         resolved_scope_key = (
@@ -85,6 +92,7 @@ def _insert_memory_entry(
             created_by="user" if normalized_source == "manual" else "system",
             updated_by="user" if normalized_source == "manual" else "system",
             agent_id=agent_id,
+            conversation_id=resolved_conversation_id,
             session_id=session_id,
             root_session_id=root_session_id,
             workspace_path=workspace_path,
@@ -114,8 +122,15 @@ def _insert_session_summary(
     hidden_from_recall: bool = False,
     deleted_at=None,
     override_target_summary_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> SessionSummary:
     with get_db_session() as session:
+        resolved_conversation_id = conversation_id
+        if resolved_conversation_id is None and session_id is not None:
+            session_record = session.get(SessionRecord, session_id)
+            resolved_conversation_id = (
+                session_record.conversation_id if session_record is not None else None
+            )
         normalized_source = "summary" if source_kind == "automatic" else source_kind
         item = SessionSummary(
             scope_key=f"session:{session_id or uuid4().hex}",
@@ -123,6 +138,7 @@ def _insert_session_summary(
             source_kind=normalized_source,
             importance=importance,
             agent_id=agent_id,
+            conversation_id=resolved_conversation_id,
             session_id=session_id,
             root_session_id=root_session_id,
             created_by="user" if normalized_source == "manual" else "system",
@@ -469,3 +485,55 @@ def test_memory_endpoints_validate_scope_context_requirements(test_client: TestC
     assert preview_response.status_code == 400
     assert "session_id" in preview_response.json()["detail"]
     assert missing_session_response.status_code == 404
+
+
+def test_current_conversation_scope_excludes_memories_from_previous_conversation_after_reset(
+    test_client: TestClient,
+) -> None:
+    session_record = _create_session(test_client, "Conversation Reset Search")
+    original_conversation_id = session_record["conversation_id"]
+
+    old_entry = _insert_memory_entry(
+        body="reset scope probe",
+        title="old-conversation-memory",
+        session_id=session_record["id"],
+        root_session_id=session_record["root_session_id"],
+        conversation_id=original_conversation_id,
+    )
+
+    reset_response = test_client.post(f"/sessions/{session_record['id']}/reset")
+    assert reset_response.status_code == 200
+    updated_session = reset_response.json()
+
+    new_entry = _insert_memory_entry(
+        body="reset scope probe",
+        title="new-conversation-memory",
+        session_id=session_record["id"],
+        root_session_id=session_record["root_session_id"],
+        conversation_id=updated_session["conversation_id"],
+    )
+
+    conversation_only = test_client.get(
+        "/memory/search",
+        params={
+            "q": "reset scope",
+            "session_id": session_record["id"],
+            "scope": "current_conversation",
+        },
+    )
+    tree_only = test_client.get(
+        "/memory/search",
+        params={
+            "q": "reset scope",
+            "session_id": session_record["id"],
+            "scope": "current_session_tree",
+        },
+    )
+
+    assert conversation_only.status_code == 200
+    assert tree_only.status_code == 200
+    assert {item["id"] for item in conversation_only.json()["items"]} == {new_entry.id}
+    assert {item["id"] for item in tree_only.json()["items"]} == {
+        old_entry.id,
+        new_entry.id,
+    }

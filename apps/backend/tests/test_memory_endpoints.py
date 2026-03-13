@@ -315,3 +315,55 @@ def test_hidden_memories_are_excluded_from_recall(test_client: TestClient) -> No
             for item in event["items"]
         }
         assert memory_id not in recalled_ids
+
+
+def test_recall_history_survives_hard_deleted_memory(test_client: TestClient) -> None:
+    _enable_memory_v1(manual_crud=True, hard_delete=True)
+    memory_id = _seed_memory(
+        kind="stable",
+        title="Tea preference",
+        content="The user prefers oolong tea in the afternoon.",
+        scope="profile",
+        source_kind="manual",
+        importance="high",
+    )
+
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={"title": "Hard delete recall", "message": "Please use the oolong tea preference."},
+    )
+
+    assert execute_response.status_code == 201
+    execution = execute_response.json()
+
+    hard_delete_response = test_client.delete(
+        f"/memory/items/{memory_id}",
+        params={"hard": "true"},
+    )
+    assert hard_delete_response.status_code == 204
+
+    recall_detail_response = test_client.get(
+        f"/memory/recall/messages/{execution['assistant_message_id']}"
+    )
+    session_recalls_response = test_client.get(
+        f"/memory/recall/sessions/{execution['session_id']}"
+    )
+    recall_log_response = test_client.get("/memory/recall")
+
+    assert recall_detail_response.status_code == 200
+    assert session_recalls_response.status_code == 200
+    assert recall_log_response.status_code == 200
+
+    recall_detail = recall_detail_response.json()
+    assert recall_detail["items"][0]["memory_id"] == memory_id
+    assert recall_detail["items"][0]["title"] == "Deleted memory"
+    assert recall_detail["items"][0]["source_kind"] == "manual"
+    assert recall_detail["items"][0]["scope"] == "profile"
+
+    session_recall = session_recalls_response.json()["items"][0]
+    assert session_recall["items"][0]["memory_id"] == memory_id
+    assert session_recall["items"][0]["title"] == "Deleted memory"
+
+    recall_log = recall_log_response.json()["items"][0]
+    assert recall_log["items"][0]["memory_id"] == memory_id
+    assert recall_log["items"][0]["title"] == "Deleted memory"

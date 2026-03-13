@@ -361,6 +361,9 @@ class MemorySearchService:
                 else (default_agent.id if default_agent is not None else None)
             ),
             session_id=session_record.id if session_record is not None else None,
+            conversation_id=(
+                session_record.conversation_id if session_record is not None else None
+            ),
             root_session_id=(
                 (session_record.root_session_id or session_record.id)
                 if session_record is not None
@@ -399,8 +402,8 @@ class MemorySearchService:
         matched: list[MemoryScopeName] = []
         if (
             "current_conversation" in applied_scopes
-            and context.session_id is not None
-            and candidate.session_id == context.session_id
+            and context.conversation_id is not None
+            and candidate.conversation_id == context.conversation_id
         ):
             matched.append("current_conversation")
         if (
@@ -511,6 +514,7 @@ class MemorySearchService:
             scope_type=override_row.scope_type if isinstance(override_row, MemoryEntry) else None,
             scope_key=override_row.scope_key,
             session_id=override_row.session_id,
+            conversation_id=override_row.conversation_id,
             root_session_id=override_row.root_session_id,
             workspace_path=override_row.workspace_path,
             user_scope_key=override_row.user_scope_key,

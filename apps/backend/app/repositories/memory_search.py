@@ -25,6 +25,7 @@ from app.models.entities import (
 class ResolvedMemoryContext:
     agent_id: str | None
     session_id: str | None
+    conversation_id: str | None
     root_session_id: str | None
     workspace_path: str | None
     user_scope_key: str | None
@@ -44,6 +45,7 @@ class MemoryCandidate:
     scope_type: str | None
     scope_key: str | None
     session_id: str | None
+    conversation_id: str | None
     root_session_id: str | None
     workspace_path: str | None
     user_scope_key: str | None
@@ -100,6 +102,7 @@ class MemorySearchRepository:
                 me.scope_type AS scope_type,
                 me.scope_key AS scope_key,
                 me.session_id AS session_id,
+                me.conversation_id AS conversation_id,
                 me.root_session_id AS root_session_id,
                 me.workspace_path AS workspace_path,
                 me.user_scope_key AS user_scope_key,
@@ -146,6 +149,7 @@ class MemorySearchRepository:
                 NULL AS scope_type,
                 ss.scope_key AS scope_key,
                 ss.session_id AS session_id,
+                ss.conversation_id AS conversation_id,
                 ss.root_session_id AS root_session_id,
                 ss.workspace_path AS workspace_path,
                 ss.user_scope_key AS user_scope_key,
@@ -289,8 +293,8 @@ class MemorySearchRepository:
         clauses: list[str] = []
         params: dict[str, Any] = {}
         if "current_conversation" in selected_scopes and context.session_id is not None:
-            clauses.append(f"{alias}.session_id = :session_id")
-            params["session_id"] = context.session_id
+            clauses.append(f"{alias}.conversation_id = :conversation_id")
+            params["conversation_id"] = context.conversation_id
         if "current_session_tree" in selected_scopes and context.root_session_id is not None:
             clauses.append(f"{alias}.root_session_id = :root_session_id")
             params["root_session_id"] = context.root_session_id
@@ -326,6 +330,7 @@ class MemorySearchRepository:
             scope_type=row["scope_type"],
             scope_key=row["scope_key"],
             session_id=row["session_id"],
+            conversation_id=row["conversation_id"],
             root_session_id=row["root_session_id"],
             workspace_path=row["workspace_path"],
             user_scope_key=row["user_scope_key"],

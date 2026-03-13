@@ -3,7 +3,16 @@ from __future__ import annotations
 from sqlmodel import select
 
 from app.db.session import get_db_session
-from app.models.entities import Agent, MemoryEntry, Message, SessionRecord, SessionSummary, utc_now
+from app.models.entities import (
+    Agent,
+    MemoryEntry,
+    Message,
+    SessionRecord,
+    SessionSummary,
+    Task,
+    TaskRun,
+    utc_now,
+)
 from app.services.prompt_context_service import PromptContextService
 
 
@@ -234,3 +243,179 @@ def test_update_conversation_summary_persists_current_conversation_summary(test_
     assert persisted.conversation_id == session_record.conversation_id
     assert persisted.source_kind == "summary"
     assert "user: Remember the user prefers short answers." in persisted.summary_text
+
+
+def test_prompt_context_excludes_previous_conversation_summary_after_reset(test_client) -> None:
+    del test_client
+    with get_db_session() as session:
+        agent = session.exec(select(Agent)).one()
+        session_record = _seed_session(agent.id, title="Conversation Reset Summary")
+        previous_summary = SessionSummary(
+            agent_id=agent.id,
+            scope_key=f"session:{session_record.id}",
+            session_id=session_record.id,
+            root_session_id=session_record.root_session_id,
+            conversation_id="conversation-previous",
+            parent_session_id=None,
+            task_run_id=None,
+            source_kind="summary",
+            summary_text="Old conversation summary should stay hidden.",
+            importance=0.0,
+            created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=None,
+            override_target_summary_id=None,
+        )
+        current_summary = SessionSummary(
+            agent_id=agent.id,
+            scope_key=f"session:{session_record.id}",
+            session_id=session_record.id,
+            root_session_id=session_record.root_session_id,
+            conversation_id=session_record.conversation_id,
+            parent_session_id=None,
+            task_run_id=None,
+            source_kind="summary",
+            summary_text="Current conversation summary stays visible.",
+            importance=0.0,
+            created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=None,
+            override_target_summary_id=None,
+        )
+        session.add(previous_summary)
+        session.add(current_summary)
+        session.commit()
+
+        resolved = PromptContextService(session).build_context(
+            agent_id=agent.id,
+            session_record=session_record,
+            current_input="What is our current context?",
+        )
+
+    included_text = "\n".join(layer.content for layer in resolved.layers)
+    assert "Current conversation summary stays visible." in included_text
+    assert "Old conversation summary should stay hidden." not in included_text
+
+
+def test_update_conversation_summary_only_updates_rolling_summary_and_ignores_run_summary(
+    test_client,
+) -> None:
+    del test_client
+    with get_db_session() as session:
+        agent = session.exec(select(Agent)).one()
+        session_record = _seed_session(agent.id, title="Rolling Summary Session")
+        session.add_all(
+            [
+                Message(
+                    session_id=session_record.id,
+                    conversation_id=session_record.conversation_id,
+                    role="user",
+                    status="committed",
+                    sequence_number=1,
+                    content_text="Capture only the active conversation summary.",
+                ),
+                Message(
+                    session_id=session_record.id,
+                    conversation_id=session_record.conversation_id,
+                    role="assistant",
+                    status="committed",
+                    sequence_number=2,
+                    content_text="The rolling summary should reflect this exchange.",
+                ),
+            ]
+        )
+        rolling_summary = SessionSummary(
+            agent_id=agent.id,
+            scope_key=f"session:{session_record.id}",
+            session_id=session_record.id,
+            root_session_id=session_record.root_session_id,
+            conversation_id=session_record.conversation_id,
+            parent_session_id=None,
+            task_run_id=None,
+            source_kind="summary",
+            summary_text="Old rolling summary.",
+            importance=0.0,
+            created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=None,
+            override_target_summary_id=None,
+        )
+        session.add(rolling_summary)
+        session.commit()
+
+        task = Task(
+            agent_id=agent.id,
+            session_id=session_record.id,
+            title="Summary run",
+            kind="agent_execution",
+            status="completed",
+        )
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+
+        task_run = TaskRun(
+            task_id=task.id,
+            status="completed",
+        )
+        session.add(task_run)
+        session.commit()
+        session.refresh(task_run)
+
+        run_summary = SessionSummary(
+            agent_id=agent.id,
+            scope_key=f"session:{session_record.id}",
+            session_id=session_record.id,
+            root_session_id=session_record.root_session_id,
+            conversation_id=session_record.conversation_id,
+            parent_session_id=None,
+            task_run_id=task_run.id,
+            source_kind="summary",
+            summary_text="Captured run summary must remain unchanged.",
+            importance=0.0,
+            created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=task_run.id,
+            override_target_summary_id=None,
+        )
+        session.add(run_summary)
+        session.commit()
+
+        service = PromptContextService(session)
+        updated_summary = service.update_conversation_summary(
+            agent_id=agent.id,
+            session_record=session_record,
+        )
+        session.commit()
+        session.refresh(rolling_summary)
+        session.refresh(run_summary)
+
+        resolved = service.build_context(
+            agent_id=agent.id,
+            session_record=session_record,
+            current_input="Summarize this chat.",
+        )
+
+    included_text = "\n".join(layer.content for layer in resolved.layers)
+    assert updated_summary is not None
+    assert updated_summary.id == rolling_summary.id
+    assert updated_summary.task_run_id is None
+    assert "Capture only the active conversation summary." in rolling_summary.summary_text
+    assert run_summary.summary_text == "Captured run summary must remain unchanged."
+    assert "Captured run summary must remain unchanged." not in included_text

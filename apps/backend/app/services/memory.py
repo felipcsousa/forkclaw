@@ -709,7 +709,10 @@ class MemoryService:
         ]
 
     def _recall_item_read(self, row: MemoryRecallLog) -> MemoryRecallItemRead:
-        item = self.get_item(row.record_id or row.memory_id or "")
+        try:
+            item = self.get_item(row.record_id or row.memory_id or "")
+        except ValueError:
+            item = self._deleted_recall_item(row)
         reason_payload = self._parse_json(row.reason_json)
         return MemoryRecallItemRead(
             memory_id=item.id,
@@ -733,6 +736,40 @@ class MemoryService:
                 else item.origin_subagent_session_id
             ),
         )
+
+    def _deleted_recall_item(self, row: MemoryRecallLog) -> MemoryItemRead:
+        kind = self._deleted_item_kind(row)
+        source_kind = row.source_kind or ("summary" if kind == "session_summary" else "manual")
+        return MemoryItemRead(
+            id=row.record_id or row.memory_id or "",
+            kind=kind,
+            title="Deleted session summary" if kind == "session_summary" else "Deleted memory",
+            content="",
+            scope=self._scope_label_from_key(row.scope_key),
+            source_kind=source_kind,
+            source_label=self._source_label(
+                source_kind,
+                is_override=row.override_status == "overrides_automatic",
+            ),
+            importance="medium",
+            state="deleted",
+            recall_status="hidden",
+            is_manual=self._is_user_managed(source_kind),
+            is_override=row.override_status == "overrides_automatic",
+            origin_session_id=None,
+            origin_subagent_session_id=None,
+            original_memory_id=None,
+            created_at=ensure_utc(row.created_at),
+            updated_at=ensure_utc(row.updated_at),
+        )
+
+    @staticmethod
+    def _deleted_item_kind(row: MemoryRecallLog) -> str:
+        if row.record_type == "session_summary" or row.scope_type == "session_summary":
+            return "session_summary"
+        if row.scope_type == "episodic":
+            return "episodic"
+        return "stable"
 
     def _recall_reason(self, item) -> str:  # noqa: ANN001
         matched_scopes = ", ".join(item.origin.matched_scopes) or "default scopes"

@@ -154,6 +154,7 @@ class PromptContextService:
             .where(
                 SessionSummary.session_id == session_record.id,
                 SessionSummary.source_kind == "summary",
+                SessionSummary.task_run_id.is_(None),
             )
             .order_by(SessionSummary.updated_at.desc(), SessionSummary.created_at.desc())
         )
@@ -327,6 +328,7 @@ class PromptContextService:
         statement = (
             select(SessionSummary)
             .where(
+                SessionSummary.task_run_id.is_(None),
                 or_(
                     SessionSummary.agent_id == agent_id,
                     SessionSummary.session_id == session_record.id,
@@ -551,10 +553,9 @@ class PromptContextService:
         summary: SessionSummary,
         session_record: SessionRecord,
     ) -> str | None:
-        if (
-            summary.conversation_id == session_record.conversation_id
-            or summary.session_id == session_record.id
-        ):
+        if summary.task_run_id is not None:
+            return None
+        if summary.conversation_id == session_record.conversation_id:
             return "conversation_summary"
         return None
 
