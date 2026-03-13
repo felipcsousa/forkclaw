@@ -20,6 +20,13 @@ event: <event-type>
 data: <json-envelope>
 ```
 
+Session-scoped streams also emit a control frame after the persisted backlog has been replayed:
+
+```text
+event: stream.ready
+data: {"type":"stream.ready","session_id":"<session-id>","data":{"phase":"live"}}
+```
+
 The JSON envelope has this shape:
 
 ```json
@@ -51,6 +58,9 @@ The JSON envelope has this shape:
 ## Notes
 
 - The stream uses persisted backend state as the source of truth. It does not emit token deltas.
+- `stream.ready` is a non-persisted control event for the session-scoped stream. It marks the boundary between replayed history and live delivery.
+- `stream.ready` is emitted without an `id`, so it does not participate in `Last-Event-ID`, replay cursors, or frontend dedupe.
+- When `task_run_id` is provided, the backend does not emit `stream.ready`; task-specific streams stay finite and only contain persisted run events.
 - The `data` payload varies by event type and includes the minimum identifiers needed by the frontend, such as `message`, `tool_call_id`, `tool_name`, `approval_id`, and `status`.
 - `tool.started`, `tool.completed`, and `tool.failed` now include persisted `input_json`, `output_json` when available, plus `started_at` and `finished_at` for timeline duration math.
 - `execution.started`, `execution.completed`, and `execution.failed` include `started_at`, `finished_at`, and `error_message` when the backend has a persisted failure reason.

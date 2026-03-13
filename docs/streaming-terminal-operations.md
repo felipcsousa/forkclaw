@@ -37,6 +37,25 @@ npm run dev
 
 For browser-only frontend work, `npm run web:dev --workspace @nanobot/desktop` also works against the local backend.
 
+## Health checks
+
+Basic process health:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+```
+
+Operational health, including the async execution worker:
+
+```bash
+curl -s http://127.0.0.1:8000/health/operational
+```
+
+Expected result:
+
+- `status: "ok"` only when `scheduler`, `execution_worker`, and `subagent_worker` are all `running`
+- `components.execution_worker` is present so async chat queue failures are visible to operators
+
 ## Test streaming manually
 
 1. Create a session:
@@ -61,7 +80,13 @@ curl -s http://127.0.0.1:8000/sessions/<session_id>/messages/async \
   -d '{"content":"List the main files in this workspace."}'
 ```
 
-Expected happy-path sequence:
+Expected session-stream sequence:
+
+- replay of persisted history, if any
+- `stream.ready`
+- live events for the new run
+
+Expected happy-path live sequence after `stream.ready`:
 
 - `message.user.accepted`
 - `assistant.run.created`
@@ -76,6 +101,13 @@ To validate replay protection, reconnect the second `curl` process with the last
 curl -N http://127.0.0.1:8000/sessions/<session_id>/events \
   -H 'Last-Event-ID: <event_id>'
 ```
+
+Expected reconnect behavior:
+
+- persisted events up to `<event_id>` are not delivered again
+- the server may replay only newer persisted events
+- the session stream emits `stream.ready` again after replay completes
+- `stream.ready` itself has no `id`, so it does not affect replay or dedupe
 
 ## Test terminal manually
 
@@ -140,6 +172,7 @@ npm run test --workspace @nanobot/desktop -- \
 ## Current limitations
 
 - The stream is session-scoped and replays persisted events, not model token deltas.
+- The session stream has two phases: replayed persisted history first, then live delivery after `stream.ready`.
 - `shell_exec` returns summarized command results, not a persistent PTY or raw terminal stream.
 - The execution worker and stream fan-out are process-local.
 - Approval resolution is still inbox-driven; there is no inline approve/deny action inside the chat run card.
