@@ -432,12 +432,19 @@ class MemoryService:
                 items=[],
             )
         first = rows[0]
+
+        record_ids = [row.record_id or row.memory_id or "" for row in rows]
+        items_map = self._batch_get_items([rid for rid in record_ids if rid])
+
         return MemoryRecallDetailRead(
             assistant_message_id=assistant_message_id,
             session_id=first.session_id or message.session_id,
             created_at=first.created_at,
             reason_summary=first.reason_summary,
-            items=[self._recall_item_read(row) for row in rows],
+            items=[
+                self._recall_item_read(row, items_map.get(row.record_id or row.memory_id or ""))
+                for row in rows
+            ],
         )
 
     def recall_for_session(self, session_id: str) -> list[SessionRecallSummaryRead]:
@@ -447,13 +454,22 @@ class MemoryService:
             .order_by(MemoryRecallLog.created_at.desc(), MemoryRecallLog.rank.asc())
         )
         grouped = self._group_recall_rows(list(self.session.exec(statement)))
+
+        all_record_ids = []
+        for _, rows in grouped:
+            all_record_ids.extend([row.record_id or row.memory_id or "" for row in rows])
+        items_map = self._batch_get_items([rid for rid in all_record_ids if rid])
+
         return [
             SessionRecallSummaryRead(
                 assistant_message_id=assistant_message_id,
                 created_at=rows[0].created_at,
                 recalled_count=len(rows),
                 reason_summary=rows[0].reason_summary,
-                items=[self._recall_item_read(row) for row in rows],
+                items=[
+                    self._recall_item_read(row, items_map.get(row.record_id or row.memory_id or ""))
+                    for row in rows
+                ],
             )
             for assistant_message_id, rows in grouped
         ]
@@ -465,6 +481,12 @@ class MemoryService:
             .order_by(MemoryRecallLog.created_at.desc(), MemoryRecallLog.rank.asc())
         )
         grouped = self._group_recall_rows(list(self.session.exec(statement)))
+
+        all_record_ids = []
+        for _, rows in grouped:
+            all_record_ids.extend([row.record_id or row.memory_id or "" for row in rows])
+        items_map = self._batch_get_items([rid for rid in all_record_ids if rid])
+
         return [
             MemoryRecallLogEntryRead(
                 id=rows[0].id,
@@ -473,10 +495,32 @@ class MemoryService:
                 task_run_id=rows[0].run_id,
                 created_at=rows[0].created_at,
                 reason_summary=rows[0].reason_summary,
-                items=[self._recall_item_read(row) for row in rows],
+                items=[
+                    self._recall_item_read(row, items_map.get(row.record_id or row.memory_id or ""))
+                    for row in rows
+                ],
             )
             for assistant_message_id, rows in grouped
         ]
+
+    def _batch_get_items(self, memory_ids: list[str]) -> dict[str, MemoryItemRead]:
+        if not memory_ids:
+            return {}
+        unique_ids = list(set(memory_ids))
+        items_map: dict[str, MemoryItemRead] = {}
+        entries = self.session.exec(select(MemoryEntry).where(MemoryEntry.id.in_(unique_ids)))
+        for entry in entries:
+            items_map[entry.id] = self._read_entry(entry)
+
+        missing_ids = [m_id for m_id in unique_ids if m_id not in items_map]
+        if missing_ids:
+            summaries = self.session.exec(
+                select(SessionSummary).where(SessionSummary.id.in_(missing_ids))
+            )
+            for summary in summaries:
+                items_map[summary.id] = self._read_summary(summary)
+
+        return items_map
 
     def _create_session_summary_item(self, payload: MemoryItemCreate) -> MemoryItemRead:
         default_agent = self._require_default_agent()
@@ -731,11 +775,18 @@ class MemoryService:
             (assistant_message_id, grouped[assistant_message_id]) for assistant_message_id in order
         ]
 
-    def _recall_item_read(self, row: MemoryRecallLog) -> MemoryRecallItemRead:
-        try:
-            item = self.get_item(row.record_id or row.memory_id or "")
-        except ValueError:
-            item = self._deleted_recall_item(row)
+    def _recall_item_read(
+        self,
+        row: MemoryRecallLog,
+        preloaded_item: MemoryItemRead | None = None,
+    ) -> MemoryRecallItemRead:
+        if preloaded_item is not None:
+            item = preloaded_item
+        else:
+            try:
+                item = self.get_item(row.record_id or row.memory_id or "")
+            except ValueError:
+                item = self._deleted_recall_item(row)
         reason_payload = self._parse_json(row.reason_json)
         return MemoryRecallItemRead(
             memory_id=item.id,
