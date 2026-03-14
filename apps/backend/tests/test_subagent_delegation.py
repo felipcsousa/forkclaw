@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from app.core.config import clear_settings_cache, get_settings
 from app.core.secrets import clear_secret_store_cache
 from app.db.seed import seed_default_data
 from app.db.session import clear_engine_cache, get_db_session
+from app.kernel.contracts import KernelMemoryRecall, KernelMemoryRecallItem
 from app.models.entities import (
     MemoryEntry,
     Message,
@@ -229,6 +231,63 @@ def test_build_delegated_request_preserves_empty_tool_scope(
             )
 
         assert request.tools == []
+
+
+def test_serialize_memory_recall_includes_query_text(tmp_path: Path, monkeypatch) -> None:
+    with _isolated_backend(tmp_path, monkeypatch):
+        with get_db_session() as session:
+            repository = AgentExecutionRepository(session)
+            agent = repository.get_default_agent()
+            assert agent is not None
+
+            session_record = repository.create_main_session(
+                agent_id=agent.id,
+                title="Recall Serialization",
+            )
+            task = repository.create_task(
+                agent.id,
+                session_record.id,
+                {"goal": "Serialize recall payload"},
+                title="Subagent delegated execution",
+                kind="subagent_execution",
+            )
+            task_run = repository.create_task_run(task.id)
+            builder = ExecutionRequestBuilder(session, repository=repository)
+            request = builder.build_delegated(
+                task=task,
+                task_run=task_run,
+                session_record=session_record,
+                goal="Serialize recall payload",
+                context_snapshot="(none)",
+                parent_session_snapshot="Parent session: Recall Serialization",
+                allowed_tool_permissions=[],
+                model_override=None,
+                max_iterations_override=None,
+            )
+
+            with_recall = replace(
+                request,
+                memory_recall=KernelMemoryRecall(
+                    reason_summary="1 memory item(s) injected for recall.",
+                    query_text="serialized recall query",
+                    items=[
+                        KernelMemoryRecallItem(
+                            memory_id="memory-1",
+                            title="Runtime memory",
+                            kind="session_summary",
+                            scope="session:memory-1",
+                            source_kind="summary",
+                            source_label="Session summary",
+                            importance="medium",
+                            reason="matched current session",
+                        )
+                    ],
+                ),
+            )
+            payload = builder.serialize_memory_recall(with_recall)
+
+        assert payload is not None
+        assert payload["query_text"] == "serialized recall query"
 
 
 def test_split_persisted_context_snapshot_avoids_parent_duplication() -> None:

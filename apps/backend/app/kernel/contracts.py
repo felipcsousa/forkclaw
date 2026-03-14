@@ -76,6 +76,7 @@ class KernelMemoryRecallItem:
 @dataclass(frozen=True)
 class KernelMemoryRecall:
     reason_summary: str
+    query_text: str | None = None
     items: list[KernelMemoryRecallItem] = field(default_factory=list)
 
 

@@ -237,6 +237,8 @@ def test_updating_autosaved_memory_creates_manual_override_without_mutating_orig
 def test_recall_endpoints_surface_memories_used_for_assistant_responses(
     test_client: TestClient,
 ) -> None:
+    _enable_memory_v1()
+
     memory_id = _seed_memory(
         kind="stable",
         title="Tea preference",
@@ -281,6 +283,8 @@ def test_recall_endpoints_surface_memories_used_for_assistant_responses(
 
 
 def test_hidden_memories_are_excluded_from_recall(test_client: TestClient) -> None:
+    _enable_memory_v1()
+
     memory_id = _seed_memory(
         kind="stable",
         title="Secret preference",

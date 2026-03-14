@@ -1,0 +1,76 @@
+name: Backend Smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Verify legacy 0011 -> head migration chain
+        run: uv run pytest tests/test_schema_and_migrations.py::test_legacy_0011_revision_upgrades_to_head -q
+
+      - name: Sidecar startup and health smoke
+        run: |
+          set -euo pipefail
+          export APP_DATA_DIR="$RUNNER_TEMP/nanobot-data"
+          export APP_LOG_DIR="$RUNNER_TEMP/nanobot-logs"
+          export APP_ARTIFACTS_DIR="$RUNNER_TEMP/nanobot-artifacts"
+          export APP_BOOTSTRAP_TOKEN="ci-bootstrap-token"
+          export APP_HOST="127.0.0.1"
+          export APP_PORT="58111"
+          mkdir -p "$APP_DATA_DIR" "$APP_LOG_DIR" "$APP_ARTIFACTS_DIR"
+
+          uv run python -m app.entrypoints.sidecar >"$RUNNER_TEMP/sidecar.stdout.log" 2>"$RUNNER_TEMP/sidecar.stderr.log" &
+          SIDECAR_PID=$!
+
+          cleanup() {
+            curl -sS -X POST -H "X-Backend-Bootstrap-Token: $APP_BOOTSTRAP_TOKEN" "http://127.0.0.1:${APP_PORT}/internal/shutdown" >/dev/null 2>&1 || true
+            sleep 1
+            kill -TERM "$SIDECAR_PID" >/dev/null 2>&1 || true
+            wait "$SIDECAR_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          HEALTH_OK=0
+          for _ in $(seq 1 40); do
+            if curl -fsS -H "X-Backend-Bootstrap-Token: $APP_BOOTSTRAP_TOKEN" "http://127.0.0.1:${APP_PORT}/health" >/dev/null; then
+              HEALTH_OK=1
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$HEALTH_OK" -ne 1 ]; then
+            echo "Sidecar health check failed."
+            cat "$RUNNER_TEMP/sidecar.stderr.log" || true
+            exit 1
+          fi
+
+          if grep -q "Can't locate revision identified by '0011_runtime_iteration_default_four'" "$RUNNER_TEMP/sidecar.stderr.log"; then
+            echo "Detected legacy migration compatibility regression."
+            cat "$RUNNER_TEMP/sidecar.stderr.log" || true
+            exit 1
+          fi
