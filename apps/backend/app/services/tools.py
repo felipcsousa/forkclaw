@@ -34,6 +34,7 @@ class ToolService(ToolExecutionPort):
         self.repository = ToolingRepository(session)
         self.registry = build_tool_registry()
         self.catalog = build_tool_catalog()
+        self.catalog_tool_names = {item.id for item in self.catalog}
 
     def list_permissions(self) -> tuple[str, list[ToolPermission]]:
         agent = self.agent_repository.get_default_agent()
@@ -43,7 +44,11 @@ class ToolService(ToolExecutionPort):
 
         self._materialize_permissions(agent.id)
         workspace_root = self._workspace_root()
-        permissions = self.repository.list_permissions(agent.id)
+        permissions = [
+            permission
+            for permission in self.repository.list_permissions(agent.id)
+            if permission.tool_name in self.catalog_tool_names
+        ]
         return str(workspace_root), permissions
 
     def list_catalog(self) -> list[ToolCatalogEntry]:
@@ -60,7 +65,11 @@ class ToolService(ToolExecutionPort):
         self._materialize_permissions(agent.id)
         profile_id = self._active_profile_id()
         profiles = list_tool_policy_profiles()
-        overrides = self.repository.list_overrides(agent.id)
+        overrides = [
+            override
+            for override in self.repository.list_overrides(agent.id)
+            if override.tool_name in self.catalog_tool_names
+        ]
         return profile_id, profiles, overrides
 
     def update_policy_profile(

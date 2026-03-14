@@ -612,3 +612,183 @@ def test_memory_recall_migration_backfills_session_summaries(tmp_path, monkeypat
     assert row["agent_id"] == "agent-1"
     assert row["summary_text"] == "Legacy summary for migration."
     assert row["source_kind"] in {"automatic", "summary"}
+
+
+def test_legacy_0011_revision_upgrades_to_head(tmp_path, monkeypatch) -> None:
+    database_path = tmp_path / "legacy_revision_0011.db"
+    backend_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    clear_settings_cache()
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+
+    command.upgrade(config, "0011_runtime_iteration_default_four")
+    command.upgrade(config, "head")
+
+    upgraded_engine = sa.create_engine(f"sqlite:///{database_path}")
+    with upgraded_engine.begin() as connection:
+        version = connection.execute(
+            sa.text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert version == "0012_deprecate_legacy_agent_tools"
+
+
+def test_legacy_agent_tools_are_deactivated_by_0012_migration(tmp_path, monkeypatch) -> None:
+    database_path = tmp_path / "legacy_agent_tools.db"
+    backend_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    clear_settings_cache()
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+
+    command.upgrade(config, "0011_runtime_iteration_default_four")
+
+    legacy_tool_names = (
+        "spawn_subagent",
+        "list_subagents",
+        "get_subagent",
+        "cancel_subagent",
+    )
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    now = datetime.now(UTC)
+    with engine.begin() as connection:
+        connection.execute(sa.text("PRAGMA foreign_keys=ON"))
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, slug, name, description, status, is_default, created_at, updated_at
+                )
+                VALUES (
+                    :id, :slug, :name, :description, :status, :is_default, :created_at, :updated_at
+                )
+                """
+            ),
+            {
+                "id": "agent-1",
+                "slug": "main",
+                "name": "Main Agent",
+                "description": None,
+                "status": "active",
+                "is_default": 1,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+
+        for index, tool_name in enumerate(legacy_tool_names, start=1):
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO tool_permissions (
+                        id,
+                        agent_id,
+                        tool_name,
+                        workspace_path,
+                        permission_level,
+                        approval_required,
+                        status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        :id,
+                        :agent_id,
+                        :tool_name,
+                        :workspace_path,
+                        :permission_level,
+                        :approval_required,
+                        :status,
+                        :created_at,
+                        :updated_at
+                    )
+                    """
+                ),
+                {
+                    "id": f"perm-{index}",
+                    "agent_id": "agent-1",
+                    "tool_name": tool_name,
+                    "workspace_path": None,
+                    "permission_level": "allow",
+                    "approval_required": 0,
+                    "status": "active",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO tool_policy_overrides (
+                        id,
+                        agent_id,
+                        tool_name,
+                        permission_level,
+                        status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        :id,
+                        :agent_id,
+                        :tool_name,
+                        :permission_level,
+                        :status,
+                        :created_at,
+                        :updated_at
+                    )
+                    """
+                ),
+                {
+                    "id": f"ovr-{index}",
+                    "agent_id": "agent-1",
+                    "tool_name": tool_name,
+                    "permission_level": "allow",
+                    "status": "active",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+
+    command.upgrade(config, "head")
+
+    upgraded_engine = sa.create_engine(f"sqlite:///{database_path}")
+    with upgraded_engine.begin() as connection:
+        permission_rows = connection.execute(
+            sa.text(
+                """
+                SELECT tool_name, status
+                FROM tool_permissions
+                WHERE tool_name IN (
+                    'spawn_subagent',
+                    'list_subagents',
+                    'get_subagent',
+                    'cancel_subagent'
+                )
+                ORDER BY tool_name
+                """
+            )
+        ).fetchall()
+        override_rows = connection.execute(
+            sa.text(
+                """
+                SELECT tool_name, status
+                FROM tool_policy_overrides
+                WHERE tool_name IN (
+                    'spawn_subagent',
+                    'list_subagents',
+                    'get_subagent',
+                    'cancel_subagent'
+                )
+                ORDER BY tool_name
+                """
+            )
+        ).fetchall()
+
+    assert permission_rows
+    assert override_rows
+    assert all(status == "inactive" for _, status in permission_rows)
+    assert all(status == "inactive" for _, status in override_rows)

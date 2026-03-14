@@ -12,7 +12,7 @@ SUBAGENT_TOOLSET_ALIASES = {
 
 SUBAGENT_TOOLSET_MAPPING = {
     "file": ["list_files", "read_file", "write_file", "edit_file"],
-    "terminal": [],
+    "terminal": ["shell_exec"],
     "web": ["web_search", "web_fetch"],
     "local_product_tools": [],
 }
@@ -76,7 +76,11 @@ def _normalize_requested_toolsets(requested_toolsets: list[str]) -> list[str]:
         if not candidate:
             continue
         if candidate not in SUBAGENT_TOOLSET_MAPPING:
-            msg = f"Unsupported toolset: {raw_toolset}."
+            supported = ", ".join(sorted(SUBAGENT_TOOLSET_MAPPING))
+            msg = (
+                f"Unsupported toolset: {raw_toolset}. "
+                f"Supported toolsets: {supported}."
+            )
             raise ValueError(msg)
         if candidate not in normalized:
             normalized.append(candidate)

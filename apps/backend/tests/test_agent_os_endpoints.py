@@ -33,6 +33,7 @@ from app.models.entities import (
     TaskRun,
     ToolCall,
     ToolPermission,
+    ToolPolicyOverride,
     utc_now,
 )
 from app.services.runtime_supervisor import RuntimeSupervisor
@@ -1126,6 +1127,86 @@ def test_tool_permissions_are_listed_and_updatable(test_client: TestClient) -> N
     assert update_response.json()["permission_level"] == "allow"
 
 
+def test_tool_permissions_hide_legacy_tools_outside_catalog(test_client: TestClient) -> None:
+    with get_db_session() as session:
+        agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
+        session.add(
+            ToolPermission(
+                agent_id=agent.id,
+                tool_name="cancel_subagent",
+                workspace_path=None,
+                permission_level="allow",
+                approval_required=False,
+                status="active",
+            )
+        )
+        session.commit()
+
+    response = test_client.get("/tools/permissions")
+    assert response.status_code == 200
+    tool_names = {item["tool_name"] for item in response.json()["items"]}
+    assert "cancel_subagent" not in tool_names
+
+
+def test_tool_policy_hides_legacy_overrides_outside_catalog(test_client: TestClient) -> None:
+    with get_db_session() as session:
+        agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
+        session.add(
+            ToolPolicyOverride(
+                agent_id=agent.id,
+                tool_name="cancel_subagent",
+                permission_level="allow",
+                status="active",
+            )
+        )
+        session.commit()
+
+    response = test_client.get("/tools/policy")
+    assert response.status_code == 200
+    override_tool_names = {item["tool_name"] for item in response.json()["overrides"]}
+    assert "cancel_subagent" not in override_tool_names
+
+
+def test_agent_execution_ignores_legacy_permissions_outside_catalog(
+    test_client: TestClient,
+) -> None:
+    with get_db_session() as session:
+        agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
+        session.add(
+            ToolPermission(
+                agent_id=agent.id,
+                tool_name="cancel_subagent",
+                workspace_path=None,
+                permission_level="allow",
+                approval_required=False,
+                status="active",
+            )
+        )
+        session.commit()
+
+    execute_response = test_client.post(
+        "/agent/execute",
+        json={"message": "ping from legacy residue"},
+    )
+    assert execute_response.status_code == 201
+    payload = execute_response.json()
+    assert payload["status"] == "completed"
+    assert "Reply: ping from legacy residue" in payload["output_text"]
+
+    with get_db_session() as session:
+        audit_event = session.exec(
+            select(AuditEvent)
+            .where(
+                AuditEvent.event_type == "tool_permissions.legacy_ignored",
+                AuditEvent.entity_id == payload["task_run_id"],
+            )
+            .order_by(AuditEvent.created_at.desc())
+        ).first()
+
+    assert audit_event is not None
+    assert "cancel_subagent" in (audit_event.payload_json or "")
+
+
 def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestClient) -> None:
     catalog_response = test_client.get("/tools/catalog")
     assert catalog_response.status_code == 200
@@ -2018,6 +2099,14 @@ def test_subagent_spawn_validates_parent_kind_toolsets_and_concurrency(
         json={"goal": "Do work", "toolsets": ["unknown-group"]},
     )
     assert invalid_toolset.status_code == 400
+    assert "supported toolsets" in invalid_toolset.json()["detail"].lower()
+
+    invalid_legacy_toolset = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "Do work", "toolsets": ["default"]},
+    )
+    assert invalid_legacy_toolset.status_code == 400
+    assert "supported toolsets" in invalid_legacy_toolset.json()["detail"].lower()
 
     blank_goal = test_client.post(
         f"/sessions/{parent_id}/subagents",

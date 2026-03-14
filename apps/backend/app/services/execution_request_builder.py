@@ -19,6 +19,9 @@ from app.services.memory import MemoryService
 from app.services.operational_settings import OperationalSettingsService
 from app.services.prompt_context_service import PromptContextService
 from app.services.skills import SkillService
+from app.tools.catalog import build_tool_catalog
+
+CURRENT_TOOL_CATALOG_NAMES = frozenset(item.id for item in build_tool_catalog())
 
 
 class ExecutionRequestBuilder:
@@ -96,7 +99,11 @@ class ExecutionRequestBuilder:
         )
 
     def list_active_tool_permissions(self, agent_id: str) -> list[ToolPermission]:
-        return self.repository.list_tool_permissions(agent_id)
+        return [
+            permission
+            for permission in self.repository.list_tool_permissions(agent_id)
+            if permission.tool_name in CURRENT_TOOL_CATALOG_NAMES
+        ]
 
     def serialize_skill_resolution(
         self,
@@ -186,6 +193,21 @@ class ExecutionRequestBuilder:
             if tool_permissions_override is None
             else tool_permissions_override
         )
+        tool_permissions, ignored_legacy_tools = self._filter_permissions_to_catalog(
+            tool_permissions
+        )
+        if ignored_legacy_tools:
+            self.repository.record_audit_event(
+                agent_id=agent.id,
+                event_type="tool_permissions.legacy_ignored",
+                entity_type="task_run",
+                entity_id=task_run.id,
+                payload={
+                    "runtime_mode": runtime_mode,
+                    "ignored_tool_names": ",".join(ignored_legacy_tools),
+                },
+                summary_text="Ignored legacy tool permissions outside the current catalog.",
+            )
         memory_service = MemoryService(self.session)
         recall_candidates = memory_service.select_for_recall(
             input_text=input_text,
@@ -326,6 +348,19 @@ class ExecutionRequestBuilder:
                 else None
             ),
         )
+
+    @staticmethod
+    def _filter_permissions_to_catalog(
+        tool_permissions: list[ToolPermission],
+    ) -> tuple[list[ToolPermission], list[str]]:
+        kept: list[ToolPermission] = []
+        ignored: set[str] = set()
+        for permission in tool_permissions:
+            if permission.tool_name in CURRENT_TOOL_CATALOG_NAMES:
+                kept.append(permission)
+                continue
+            ignored.add(permission.tool_name)
+        return kept, sorted(ignored)
 
     @staticmethod
     def _serialize_prompt_context(prompt_context) -> dict[str, object]:
