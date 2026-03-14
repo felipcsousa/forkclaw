@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import or_
@@ -11,6 +12,7 @@ from app.models.entities import (
     AuditEvent,
     MemoryChangeLog,
     MemoryEntry,
+    MemoryRecallLog,
     MemoryRelation,
     SessionSummary,
     Setting,
@@ -201,6 +203,20 @@ class MemoryRepository:
             return None
         statement = select(SessionSummary).where(SessionSummary.task_run_id == task_run_id)
         return self.session.exec(statement).first()
+
+    def list_recent_recall_record_ids(
+        self,
+        *,
+        session_id: str,
+        since: datetime,
+    ) -> set[str]:
+        statement = select(MemoryRecallLog.record_id).where(
+            MemoryRecallLog.session_id == session_id,
+            MemoryRecallLog.decision == "included",
+            MemoryRecallLog.created_at >= since,
+            MemoryRecallLog.record_id.is_not(None),
+        )
+        return {record_id for record_id in self.session.exec(statement) if record_id}
 
     def record_audit_event(
         self,

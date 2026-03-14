@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -252,14 +253,28 @@ class MemoryService:
         session_id: str,
         limit: int = 5,
     ) -> list[MemoryRecallCandidate]:
+        if not self.repository.get_feature_flag("memory_v1_enabled", default=False):
+            return []
+
+        recent_record_ids = self.repository.list_recent_recall_record_ids(
+            session_id=session_id,
+            since=utc_now() - timedelta(hours=12),
+        )
         response = self.search.search(
             q=input_text,
             session_id=session_id,
             scopes=None,
-            limit=limit,
+            limit=max(limit * 4, limit),
         )
         candidates: list[MemoryRecallCandidate] = []
+        current_ids: set[str] = set()
         for item in response.items:
+            score_breakdown = item.score_breakdown or {}
+            lexical_score = float(score_breakdown.get("lexical") or 0.0)
+            if lexical_score <= 0.0:
+                continue
+            if item.id in recent_record_ids or item.id in current_ids:
+                continue
             title = item.title or item.summary or item.body or "Memory"
             scope = self._scope_label_from_key(item.origin.scope_key)
             kind = (
@@ -308,6 +323,9 @@ class MemoryService:
                     score=item.score,
                 )
             )
+            current_ids.add(item.id)
+            if len(candidates) >= limit:
+                break
         return candidates
 
     def inject_recall_context(
@@ -345,6 +363,10 @@ class MemoryService:
 
         message = self._require_message(assistant_message_id)
         reason_summary = payload.get("reason_summary") if isinstance(payload, dict) else None
+        query_text = payload.get("query_text") if isinstance(payload, dict) else None
+        normalized_query_text = (
+            query_text.strip() if isinstance(query_text, str) and query_text.strip() else None
+        )
         for index, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
@@ -375,6 +397,7 @@ class MemoryService:
                 conversation_id=message.conversation_id,
                 session_id=session_id,
                 run_id=task_run_id,
+                query_text=normalized_query_text,
                 recall_reason="runtime_context",
                 decision="included",
                 rank=index,

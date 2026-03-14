@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -13,8 +15,11 @@ from app.models.entities import (
     MemoryRecallLog,
     SessionRecord,
     SessionSummary,
+    Setting,
     utc_now,
 )
+from app.repositories.agent_execution import AgentExecutionRepository
+from app.services.memory import MemoryService
 
 
 def _default_agent_id() -> str:
@@ -27,6 +32,16 @@ def _workspace_root(test_client: TestClient) -> str:
     response = test_client.get("/settings/operational")
     assert response.status_code == 200
     return response.json()["workspace_root"]
+
+
+def _set_feature_flag(key: str, enabled: bool) -> None:
+    with get_db_session() as session:
+        setting = session.exec(
+            select(Setting).where(Setting.scope == "features", Setting.key == key)
+        ).one()
+        setting.value_text = "true" if enabled else "false"
+        session.add(setting)
+        session.commit()
 
 
 def _create_session(test_client: TestClient, title: str) -> dict:
@@ -152,6 +167,34 @@ def _insert_session_summary(
         session.commit()
         session.refresh(item)
         return item
+
+
+def _make_search_item(
+    *,
+    item_id: str,
+    lexical: float,
+    recency: float,
+    score: float = 1.0,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=item_id,
+        title=f"title-{item_id}",
+        summary=f"summary-{item_id}",
+        body=f"body-{item_id}",
+        record_type="session_summary",
+        source_kind="summary",
+        importance=0.4,
+        score=score,
+        score_breakdown={"lexical": lexical, "recency": recency},
+        origin=SimpleNamespace(
+            scope_key=f"session:{item_id}",
+            scope_type="session_summary",
+            session_id="session-origin",
+            root_session_id="session-origin",
+            matched_scopes=["agent", "user"],
+        ),
+        override=SimpleNamespace(status="none", target_id=None),
+    )
 
 
 def test_memory_search_returns_lexical_hits_across_memory_and_session_summaries(
@@ -537,3 +580,124 @@ def test_current_conversation_scope_excludes_memories_from_previous_conversation
         old_entry.id,
         new_entry.id,
     }
+
+
+def test_select_for_recall_returns_empty_when_memory_v1_disabled(test_client: TestClient) -> None:
+    _set_feature_flag("memory_v1_enabled", False)
+    session_record = _create_session(test_client, "Recall Flag Off")
+
+    with get_db_session() as session:
+        service = MemoryService(session)
+
+        def _unexpected_search(**_kwargs):
+            raise AssertionError("Runtime recall search should not run when feature is disabled.")
+
+        service.search.search = _unexpected_search  # type: ignore[assignment]
+        candidates = service.select_for_recall(
+            input_text="any recall input",
+            session_id=session_record["id"],
+        )
+
+    assert candidates == []
+
+
+def test_select_for_recall_applies_runtime_quality_filters_and_temporal_dedupe(
+    test_client: TestClient,
+) -> None:
+    _set_feature_flag("memory_v1_enabled", True)
+    session_record = _create_session(test_client, "Recall Filtering")
+
+    with get_db_session() as session:
+        recent_duplicate = MemoryRecallLog(
+            memory_id="dup-1",
+            scope_type="session_summary",
+            scope_key="session:dup-1",
+            session_id=session_record["id"],
+            conversation_id=session_record["conversation_id"],
+            recall_reason="runtime_context",
+            decision="included",
+            record_type="session_summary",
+            record_id="dup-1",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        old_duplicate = MemoryRecallLog(
+            memory_id="stale-dup",
+            scope_type="session_summary",
+            scope_key="session:stale-dup",
+            session_id=session_record["id"],
+            conversation_id=session_record["conversation_id"],
+            recall_reason="runtime_context",
+            decision="included",
+            record_type="session_summary",
+            record_id="stale-dup",
+            created_at=utc_now() - timedelta(hours=13),
+            updated_at=utc_now() - timedelta(hours=13),
+        )
+        session.add(recent_duplicate)
+        session.add(old_duplicate)
+        session.commit()
+
+        service = MemoryService(session)
+        mocked_items = [
+            _make_search_item(item_id="keep-1", lexical=1.2, recency=0.6, score=2.1),
+            _make_search_item(item_id="lexical-zero", lexical=0.0, recency=0.6, score=2.0),
+            _make_search_item(item_id="old-1", lexical=0.8, recency=0.0, score=1.9),
+            _make_search_item(item_id="dup-1", lexical=0.9, recency=0.6, score=1.8),
+            _make_search_item(item_id="stale-dup", lexical=0.7, recency=0.6, score=1.7),
+        ]
+        service.search.search = lambda **_kwargs: SimpleNamespace(items=mocked_items)  # type: ignore[assignment]
+
+        candidates = service.select_for_recall(
+            input_text="runtime recall query",
+            session_id=session_record["id"],
+            limit=5,
+        )
+
+    assert [candidate.item.id for candidate in candidates] == ["keep-1", "old-1", "stale-dup"]
+
+
+def test_runtime_recall_event_persists_query_text(test_client: TestClient) -> None:
+    _set_feature_flag("memory_v1_enabled", True)
+    session_record = _create_session(test_client, "Recall Query Persistence")
+
+    with get_db_session() as session:
+        repository = AgentExecutionRepository(session)
+        assistant = repository.create_message(
+            session_record["id"],
+            "assistant",
+            "Assistant response with runtime recall.",
+        )
+        session.commit()
+
+        service = MemoryService(session)
+        service.record_recall_event(
+            assistant_message_id=assistant.id,
+            session_id=session_record["id"],
+            task_run_id="task-run-1",
+            payload={
+                "reason_summary": "1 memory item(s) injected for recall.",
+                "query_text": "  repositories github check  ",
+                "items": [
+                    {
+                        "memory_id": "runtime-memory-id",
+                        "title": "Runtime Summary",
+                        "kind": "session_summary",
+                        "scope": f"session:{session_record['id']}",
+                        "source_kind": "summary",
+                        "source_label": "Summary",
+                        "importance": "medium",
+                        "reason": "Matched current session",
+                    }
+                ],
+            },
+        )
+
+        row = session.exec(
+            select(MemoryRecallLog)
+            .where(MemoryRecallLog.assistant_message_id == assistant.id)
+            .order_by(MemoryRecallLog.created_at.desc())
+        ).first()
+
+    assert row is not None
+    assert row.query_text == "repositories github check"

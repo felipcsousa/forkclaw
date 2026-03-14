@@ -134,6 +134,7 @@ class ExecutionRequestBuilder:
 
         return {
             "reason_summary": request.memory_recall.reason_summary,
+            "query_text": request.memory_recall.query_text,
             "items": [
                 {
                     "memory_id": item.memory_id,
@@ -328,6 +329,7 @@ class ExecutionRequestBuilder:
             memory_recall=(
                 KernelMemoryRecall(
                     reason_summary=f"{len(recall_candidates)} memory item(s) injected for recall.",
+                    query_text=input_text,
                     items=[
                         KernelMemoryRecallItem(
                             memory_id=candidate.item.id,
