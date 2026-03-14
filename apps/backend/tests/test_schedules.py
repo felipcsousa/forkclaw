@@ -59,10 +59,10 @@ def test_parse_schedule_invalid_interval_value():
     with pytest.raises(ValueError, match="Interval schedule must be greater than zero."):
         parse_schedule("every:0s", "UTC")
 
-    with pytest.raises(
-        ValueError,
-        match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`.",
-    ):
+    with pytest.raises(ValueError, match="Interval schedule must be greater than zero."):
+        parse_schedule("every:0m", "UTC")
+
+    with pytest.raises(ValueError, match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`."):
         parse_schedule("every:-5m", "UTC")
 
 
