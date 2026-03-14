@@ -1,6 +1,10 @@
-import pytest
+from __future__ import annotations
+
 from datetime import timedelta
-from app.core.schedules import parse_schedule, ParsedSchedule
+
+import pytest
+
+from app.core.schedules import ParsedSchedule, _validate_clock, parse_schedule
 
 
 def test_parse_schedule_valid_interval():
@@ -55,8 +59,39 @@ def test_parse_schedule_invalid_interval_value():
     with pytest.raises(ValueError, match="Interval schedule must be greater than zero."):
         parse_schedule("every:0s", "UTC")
 
-    with pytest.raises(ValueError, match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`."):
+    with pytest.raises(
+        ValueError,
+        match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`.",
+    ):
         parse_schedule("every:-5m", "UTC")
+
+
+def test_validate_clock_valid_boundaries():
+    _validate_clock(0, 0)
+    _validate_clock(23, 59)
+    _validate_clock(12, 30)
+
+
+def test_validate_clock_invalid_hours():
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(24, 0)
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(-1, 0)
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(25, 0)
+
+
+def test_validate_clock_invalid_minutes():
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(12, 60)
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(12, -1)
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        _validate_clock(12, 61)
 
 
 def test_parse_schedule_invalid_clock():
@@ -65,6 +100,12 @@ def test_parse_schedule_invalid_clock():
 
     with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
         parse_schedule("daily:12:60", "UTC")
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        parse_schedule("weekly:mon@24:00", "UTC")
+
+    with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
+        parse_schedule("weekly:mon@12:60", "UTC")
 
     with pytest.raises(ValueError, match="Invalid hour or minute in schedule."):
         parse_schedule("weekly:mon@25:00", "UTC")
@@ -77,13 +118,16 @@ def test_parse_schedule_invalid_timezone():
     with pytest.raises(ValueError, match="Invalid timezone: Invalid/Zone"):
         parse_schedule("weekly:tue@12:00", "Invalid/Zone")
 
-    # Interval parsing doesn't validate timezone directly at parse time in this implementation
-    # It just stores it. But that's fine according to code logic.
-
 
 def test_parse_schedule_completely_invalid_format():
-    with pytest.raises(ValueError, match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`."):
+    with pytest.raises(
+        ValueError,
+        match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`.",
+    ):
         parse_schedule("random string", "UTC")
 
-    with pytest.raises(ValueError, match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`."):
+    with pytest.raises(
+        ValueError,
+        match="Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`.",
+    ):
         parse_schedule("yearly:01-01", "UTC")
