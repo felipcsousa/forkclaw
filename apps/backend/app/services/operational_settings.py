@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,8 @@ from app.schemas.operational_settings import (
     OperationalSettingsRead,
     OperationalSettingsUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -304,7 +307,11 @@ class OperationalSettingsService:
                     if model_name:
                         return model_name
             except ValueError:
-                pass
+                logger.warning(
+                    "Failed to normalize profile provider '%s'",
+                    profile_provider,
+                    exc_info=True,
+                )
 
         try:
             default_provider = normalize_provider_id(app_default_provider)
