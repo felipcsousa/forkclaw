@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,8 @@ from app.tools.policies import (
 )
 from app.tools.registry import build_tool_registry
 from app.tools.web.cache import SqlToolCacheStore
+
+logger = logging.getLogger(__name__)
 
 
 class ToolService(ToolExecutionPort):
@@ -648,7 +651,10 @@ class ToolService(ToolExecutionPort):
             try:
                 return int(setting.value_text)
             except ValueError:
-                pass
+                logger.warning(
+                    "Failed to parse shell_exec_max_output_chars setting: %s. Using default.",
+                    setting.value_text,
+                )
         return get_settings().shell_exec_max_output_chars
 
     def _shell_exec_max_timeout_seconds(self) -> float:
@@ -657,5 +663,8 @@ class ToolService(ToolExecutionPort):
             try:
                 return float(setting.value_text)
             except ValueError:
-                pass
+                logger.warning(
+                    "Failed to parse shell_exec_max_timeout_seconds setting: %s. Using default.",
+                    setting.value_text,
+                )
         return get_settings().shell_exec_max_timeout_seconds
