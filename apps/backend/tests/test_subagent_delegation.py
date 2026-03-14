@@ -135,7 +135,7 @@ def test_resolve_subagent_tool_scope_respects_requested_groups_and_deny_wins() -
     )
 
     assert resolution.requested_toolsets == ["file", "web", "terminal", "local_product_tools"]
-    assert resolution.empty_groups == ["terminal", "local_product_tools"]
+    assert resolution.empty_groups == ["local_product_tools"]
     assert resolution.allowed_tool_names == ["list_files", "web_search"]
     assert resolution.denied_tool_names == ["read_file"]
     assert [item.tool_name for item in resolution.effective_permissions] == [
@@ -154,8 +154,44 @@ def test_resolve_subagent_tool_scope_rejects_invalid_group() -> None:
         )
     except ValueError as exc:
         assert "unknown-group" in str(exc)
+        assert "supported toolsets" in str(exc).lower()
     else:
         raise AssertionError("Expected invalid group to raise ValueError.")
+
+
+def test_resolve_subagent_tool_scope_rejects_legacy_default_group() -> None:
+    try:
+        resolve_subagent_tool_scope(
+            requested_toolsets=["default"],
+            tool_permissions=[],
+        )
+    except ValueError as exc:
+        assert "default" in str(exc)
+        assert "supported toolsets" in str(exc).lower()
+    else:
+        raise AssertionError("Expected legacy `default` group to raise ValueError.")
+
+
+def test_resolve_subagent_tool_scope_maps_terminal_to_shell_exec() -> None:
+    permissions = [
+        ToolPermission(
+            agent_id="agent-1",
+            tool_name="shell_exec",
+            workspace_path="/tmp/workspace",
+            permission_level="allow",
+            approval_required=False,
+            status="active",
+        ),
+    ]
+
+    resolution = resolve_subagent_tool_scope(
+        requested_toolsets=["terminal"],
+        tool_permissions=permissions,
+    )
+
+    assert resolution.requested_toolsets == ["terminal"]
+    assert resolution.empty_groups == []
+    assert resolution.allowed_tool_names == ["shell_exec"]
 
 
 def test_build_delegated_request_preserves_empty_tool_scope(

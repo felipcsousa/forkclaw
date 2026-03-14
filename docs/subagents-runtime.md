@@ -32,7 +32,7 @@ Mapeamento atual de grupos publicos para tools reais:
 
 - `file` -> `list_files`, `read_file`, `write_file`, `edit_file`
 - `web` -> `web_search`, `web_fetch`
-- `terminal` -> sem tools concretas no catalogo atual
+- `terminal` -> `shell_exec`
 - `local_product_tools` -> sem tools concretas no catalogo atual
 
 Aliases legados aceitos no request:
