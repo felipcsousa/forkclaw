@@ -92,13 +92,10 @@ def _token_protected_client(
             if use_default_runtime_supervisor
             else create_app(
                 shutdown_callback=shutdown_callback,
-                runtime_supervisor=runtime_supervisor
-                or RuntimeSupervisor(get_settings()),
+                runtime_supervisor=runtime_supervisor or RuntimeSupervisor(get_settings()),
             )
         )
-        with TestClient(
-            app
-        ) as client:
+        with TestClient(app) as client:
             yield client
     finally:
         clear_engine_cache()
@@ -473,15 +470,7 @@ def test_skills_endpoint_lists_precedence_and_blocked_reasons(
         name="Darwin Helper",
         description="Only for macOS",
         metadata=json.dumps(
-            {
-                "forkclaw": {
-                    "os": [
-                        "windows"
-                        if platform.system().lower() != "windows"
-                        else "linux"
-                    ]
-                }
-            }
+            {"forkclaw": {"os": ["windows" if platform.system().lower() != "windows" else "linux"]}}
         ),
         body="macOS only",
     )
@@ -836,9 +825,7 @@ def test_agent_execute_persists_messages_and_task_run(test_client: TestClient) -
             )
         )
         task = session.exec(select(Task).where(Task.id == payload["task_id"])).one()
-        task_run = session.exec(
-            select(TaskRun).where(TaskRun.id == payload["task_run_id"])
-        ).one()
+        task_run = session.exec(select(TaskRun).where(TaskRun.id == payload["task_run_id"])).one()
         audit_events = list(
             session.exec(
                 select(AuditEvent)
@@ -998,8 +985,7 @@ def test_agent_config_can_be_updated_and_reset(test_client: TestClient) -> None:
             "name": "Desk Operator",
             "description": "Configuration for a family-office style operator.",
             "identity_text": (
-                "Act as a meticulous desktop operator with strong "
-                "accounting discipline."
+                "Act as a meticulous desktop operator with strong accounting discipline."
             ),
             "soul_text": "Respond in a calm and exact tone.",
             "user_context_text": "The user prefers short operational answers.",
@@ -1265,8 +1251,7 @@ def test_tool_policy_profile_change_recomputes_effective_permissions(
     permissions_response = test_client.get("/tools/permissions")
     assert permissions_response.status_code == 200
     permissions = {
-        item["tool_name"]: item["permission_level"]
-        for item in permissions_response.json()["items"]
+        item["tool_name"]: item["permission_level"] for item in permissions_response.json()["items"]
     }
     assert permissions["web_search"] == "allow"
     assert permissions["web_fetch"] == "allow"
@@ -1287,8 +1272,7 @@ def test_tool_permission_override_is_reflected_in_policy_state(test_client: Test
     policy_response = test_client.get("/tools/policy")
     assert policy_response.status_code == 200
     overrides = {
-        item["tool_name"]: item["permission_level"]
-        for item in policy_response.json()["overrides"]
+        item["tool_name"]: item["permission_level"] for item in policy_response.json()["overrides"]
     }
     assert overrides["web_fetch"] == "ask"
 
@@ -1356,9 +1340,7 @@ def test_ask_mode_pauses_execution_and_creates_pending_approval(
     assert "requires approval" in payload["output_text"]
 
     with get_db_session() as session:
-        task_run = session.exec(
-            select(TaskRun).where(TaskRun.id == payload["task_run_id"])
-        ).one()
+        task_run = session.exec(select(TaskRun).where(TaskRun.id == payload["task_run_id"])).one()
         task = session.exec(select(Task).where(Task.id == payload["task_id"])).one()
         persisted_messages = list(
             session.exec(
@@ -1414,9 +1396,7 @@ def test_approve_executes_tool_and_resumes_kernel(test_client: TestClient) -> No
         refreshed_tool_call = session.exec(
             select(ToolCall).where(ToolCall.id == tool_call.id)
         ).one()
-        refreshed_approval = session.exec(
-            select(Approval).where(Approval.id == approval.id)
-        ).one()
+        refreshed_approval = session.exec(select(Approval).where(Approval.id == approval.id)).one()
         refreshed_task_run = session.exec(
             select(TaskRun).where(TaskRun.id == payload["task_run_id"])
         ).one()
@@ -1463,9 +1443,7 @@ def test_deny_marks_execution_failed_with_traceability(test_client: TestClient) 
         refreshed_tool_call = session.exec(
             select(ToolCall).where(ToolCall.id == tool_call.id)
         ).one()
-        refreshed_approval = session.exec(
-            select(Approval).where(Approval.id == approval.id)
-        ).one()
+        refreshed_approval = session.exec(select(Approval).where(Approval.id == approval.id)).one()
         refreshed_task_run = session.exec(
             select(TaskRun).where(TaskRun.id == payload["task_run_id"])
         ).one()
@@ -1683,9 +1661,9 @@ def test_activity_timeline_supports_optional_cursor_pagination(
     assert second_page.status_code == 200
     second_payload = second_page.json()
     assert len(second_payload["items"]) >= 1
-    assert {
-        item["task_run_id"] for item in first_payload["items"]
-    }.isdisjoint({item["task_run_id"] for item in second_payload["items"]})
+    assert {item["task_run_id"] for item in first_payload["items"]}.isdisjoint(
+        {item["task_run_id"] for item in second_payload["items"]}
+    )
 
 
 def test_activity_timeline_query_budget_is_batched(
@@ -1778,12 +1756,14 @@ def test_cron_job_can_be_created_and_runs_automatically(test_client: TestClient)
     assert job["next_run_at"] is not None
 
     history = _wait_for(
-        lambda: [
-            item
-            for item in test_client.get("/cron-jobs").json()["history"]
-            if item["cron_job_id"] == job["id"] and item["status"] == "completed"
-        ]
-        or None,
+        lambda: (
+            [
+                item
+                for item in test_client.get("/cron-jobs").json()["history"]
+                if item["cron_job_id"] == job["id"] and item["status"] == "completed"
+            ]
+            or None
+        ),
         timeout=2.5,
         interval=0.2,
     )
@@ -1870,10 +1850,12 @@ def test_heartbeat_records_activity_and_cleans_stale_runs(test_client: TestClien
 
     dashboard = _wait_for(
         lambda: (
-            lambda current: current
-            if current["heartbeat"]["last_run_at"] is not None
-            and current["heartbeat"]["cleaned_stale_runs"] >= 1
-            else None
+            lambda current: (
+                current
+                if current["heartbeat"]["last_run_at"] is not None
+                and current["heartbeat"]["cleaned_stale_runs"] >= 1
+                else None
+            )
         )(test_client.get("/cron-jobs").json()),
         timeout=2.5,
         interval=0.2,
@@ -1966,30 +1948,40 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     }
 
     with get_db_session() as session:
-        child_row = session.connection().execute(
-            text(
-                """
+        child_row = (
+            session.connection()
+            .execute(
+                text(
+                    """
                 SELECT kind, parent_session_id, root_session_id, spawn_depth,
                        delegated_goal, delegated_context_snapshot, tool_profile,
                        model_override, max_iterations, timeout_seconds
                 FROM sessions
                 WHERE id = :child_id
                 """
-            ),
-            {"child_id": child_id},
-        ).mappings().one()
-        run_row = session.connection().execute(
-            text(
-                """
+                ),
+                {"child_id": child_id},
+            )
+            .mappings()
+            .one()
+        )
+        run_row = (
+            session.connection()
+            .execute(
+                text(
+                    """
                 SELECT launcher_session_id, child_session_id, launcher_message_id,
                        launcher_task_run_id, parent_summary_message_id,
                        lifecycle_status, cancellation_requested_at, final_summary, final_output_json
                 FROM session_subagent_runs
                 WHERE child_session_id = :child_id
                 """
-            ),
-            {"child_id": child_id},
-        ).mappings().one()
+                ),
+                {"child_id": child_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert child_row["kind"] == "subagent"
     assert child_row["parent_session_id"] == parent_id
@@ -2023,16 +2015,21 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     fallback_child_id = fallback_response.json()["child_session_id"]
 
     with get_db_session() as session:
-        fallback_run = session.connection().execute(
-            text(
-                """
+        fallback_run = (
+            session.connection()
+            .execute(
+                text(
+                    """
                 SELECT launcher_message_id, launcher_task_run_id
                 FROM session_subagent_runs
                 WHERE child_session_id = :child_id
                 """
-            ),
-            {"child_id": fallback_child_id},
-        ).mappings().one()
+                ),
+                {"child_id": fallback_child_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert fallback_run["launcher_message_id"] == parent_message_id
     assert fallback_run["launcher_task_run_id"] is None
@@ -2253,9 +2250,9 @@ def test_subagent_with_empty_effective_scope_does_not_inherit_parent_tools(
 
     detail_payload = _wait_for(
         lambda: (
-            lambda payload: payload
-            if payload["run"]["lifecycle_status"] in {"failed", "completed"}
-            else None
+            lambda payload: (
+                payload if payload["run"]["lifecycle_status"] in {"failed", "completed"} else None
+            )
         )(test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()),
         timeout=3.0,
         interval=0.1,

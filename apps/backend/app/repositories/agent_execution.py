@@ -94,12 +94,9 @@ class AgentExecutionRepository:
         *,
         conversation_id: str | None = None,
     ) -> list[Message]:
-        statement = (
-            select(Message)
-            .where(
-                Message.session_id == session_id,
-                Message.sequence_number <= sequence_number,
-            )
+        statement = select(Message).where(
+            Message.session_id == session_id,
+            Message.sequence_number <= sequence_number,
         )
         if conversation_id is not None:
             statement = statement.where(Message.conversation_id == conversation_id)
@@ -213,9 +210,7 @@ class AgentExecutionRepository:
         task_run.finished_at = utc_now()
         if task_run.started_at is not None:
             task_run.duration_ms = int(
-                (
-                    ensure_utc(task_run.finished_at) - ensure_utc(task_run.started_at)
-                ).total_seconds()
+                (ensure_utc(task_run.finished_at) - ensure_utc(task_run.started_at)).total_seconds()
                 * 1000
             )
         task_run.estimated_cost_usd = estimated_cost_usd

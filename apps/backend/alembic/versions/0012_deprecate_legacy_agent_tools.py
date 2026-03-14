@@ -43,4 +43,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     # One-way deprecation. Legacy tools stay inactive on downgrade.
     return None
-

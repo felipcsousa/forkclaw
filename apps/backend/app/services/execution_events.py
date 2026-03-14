@@ -272,9 +272,9 @@ class ExecutionEventService:
             if public_type in {"execution.completed", "execution.failed"} and finished_at is None:
                 finished_at = audit_event.created_at
             data = ExecutionStateData(
-                status="completed" if public_type == "execution.completed" else (
-                    "failed" if public_type == "execution.failed" else "running"
-                ),
+                status="completed"
+                if public_type == "execution.completed"
+                else ("failed" if public_type == "execution.failed" else "running"),
                 error_message=error_message,
                 started_at=started_at,
                 finished_at=finished_at,
@@ -379,11 +379,7 @@ class ExecutionEventService:
         if not criteria:
             return []
 
-        statement = (
-            select(AuditEvent)
-            .where(or_(*criteria))
-            .order_by(AuditEvent.created_at.asc())
-        )
+        statement = select(AuditEvent).where(or_(*criteria)).order_by(AuditEvent.created_at.asc())
         return self.session.exec(statement)
 
     @staticmethod

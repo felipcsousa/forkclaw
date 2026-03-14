@@ -177,8 +177,7 @@ class ApprovalService:
             event_summary="Execution finished with failure.",
             event_payload={},
             assistant_message_text=(
-                f"Approval denied for `{bundle.tool_call.tool_name}`. "
-                "The action was not executed."
+                f"Approval denied for `{bundle.tool_call.tool_name}`. The action was not executed."
             ),
             record_message_completed_event=bundle.task.kind == "agent_execution_async",
         )

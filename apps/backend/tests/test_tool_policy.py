@@ -34,19 +34,25 @@ def test_minimal_profile_denies_web_tools_by_default() -> None:
     profile = get_tool_policy_profile("minimal")
 
     assert profile.defaults["group:web"] == "deny"
-    assert resolve_effective_permission_level(
-        profile_id="minimal",
-        tool_group="group:web",
-        override_level=None,
-    ) == "deny"
+    assert (
+        resolve_effective_permission_level(
+            profile_id="minimal",
+            tool_group="group:web",
+            override_level=None,
+        )
+        == "deny"
+    )
 
 
 def test_override_wins_over_profile_default() -> None:
-    assert resolve_effective_permission_level(
-        profile_id="research",
-        tool_group="group:web",
-        override_level="ask",
-    ) == "ask"
+    assert (
+        resolve_effective_permission_level(
+            profile_id="research",
+            tool_group="group:web",
+            override_level="ask",
+        )
+        == "ask"
+    )
 
 
 def test_profiles_are_listed_in_stable_order() -> None:

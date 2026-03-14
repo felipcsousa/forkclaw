@@ -62,8 +62,7 @@ class ShellExecTool:
                 "cwd": {
                     "type": "string",
                     "description": (
-                        "Working directory, relative to the workspace or absolute in the "
-                        "allowlist."
+                        "Working directory, relative to the workspace or absolute in the allowlist."
                     ),
                 },
                 "timeout_seconds": {

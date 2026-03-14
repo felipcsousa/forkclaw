@@ -46,6 +46,6 @@ def test_memory_public_routes_are_registered(test_client) -> None:
 
     for path in endpoints:
         response = test_client.get(path)
-        assert not (
-            response.status_code == 404 and response.json().get("detail") == "Not Found"
-        ), path
+        assert not (response.status_code == 404 and response.json().get("detail") == "Not Found"), (
+            path
+        )

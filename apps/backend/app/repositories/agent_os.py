@@ -19,11 +19,7 @@ class AgentRepository:
         self.session = session
 
     def get_default_agent(self) -> Agent | None:
-        statement = (
-            select(Agent)
-            .where(Agent.is_default.is_(True))
-            .order_by(Agent.created_at.asc())
-        )
+        statement = select(Agent).where(Agent.is_default.is_(True)).order_by(Agent.created_at.asc())
         return self.session.exec(statement).first()
 
     def get_profile(self, agent_id: str) -> AgentProfile | None:
@@ -70,9 +66,7 @@ class SessionRepository:
             return list(self.session.exec(statement)), False, None
 
         rows = list(
-            self.session.exec(
-                statement.order_by(Message.sequence_number.desc()).limit(limit + 1)
-            )
+            self.session.exec(statement.order_by(Message.sequence_number.desc()).limit(limit + 1))
         )
         has_more = len(rows) > limit
         page = rows[:limit]

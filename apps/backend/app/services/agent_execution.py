@@ -580,9 +580,7 @@ class AgentExecutionService:
             skill_resolution_payload=self.request_builder.serialize_skill_resolution(
                 prepared.request
             ),
-            memory_recall_payload=self.request_builder.serialize_memory_recall(
-                prepared.request
-            ),
+            memory_recall_payload=self.request_builder.serialize_memory_recall(prepared.request),
             assistant_message_text=result.output_text,
             record_message_completed_event=record_message_completed_event,
         )

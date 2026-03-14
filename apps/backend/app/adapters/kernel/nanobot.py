@@ -288,8 +288,7 @@ class NanobotKernelAdapter(AgentKernelPort):
                 [tool.tool_name for tool in request.tools],
                 format=tool_format,
             )
-            if self.tool_executor is not None
-            and available_tools is None
+            if self.tool_executor is not None and available_tools is None
             else None
         )
         self._raise_if_cancelled()
@@ -420,7 +419,8 @@ class NanobotKernelAdapter(AgentKernelPort):
                 raise ValueError(msg)
         return build_provider(
             provider_name=provider_name,
-            model_name=model_name or ProductEchoLLMProvider(
+            model_name=model_name
+            or ProductEchoLLMProvider(
                 agent_name=request.identity.name,
                 identity_text=request.identity.identity_text,
                 soul_text=request.soul.soul_text,

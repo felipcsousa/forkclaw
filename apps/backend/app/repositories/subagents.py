@@ -222,9 +222,7 @@ class SubagentRepository:
             return list(self.session.exec(statement)), False, None
 
         rows = list(
-            self.session.exec(
-                statement.order_by(Message.sequence_number.desc()).limit(limit + 1)
-            )
+            self.session.exec(statement.order_by(Message.sequence_number.desc()).limit(limit + 1))
         )
         has_more = len(rows) > limit
         page = rows[:limit]

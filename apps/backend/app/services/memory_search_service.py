@@ -216,10 +216,10 @@ class MemorySearchService:
                 "autosaved",
             }:
                 override_row = memory_overrides.get(candidate.id)
-            elif (
-                candidate.record_type == "session_summary"
-                and candidate.source_kind in {"automatic", "summary"}
-            ):
+            elif candidate.record_type == "session_summary" and candidate.source_kind in {
+                "automatic",
+                "summary",
+            }:
                 override_row = session_summary_overrides.get(candidate.id)
 
             effective_candidate = candidate
@@ -270,9 +270,9 @@ class MemorySearchService:
             if payload["override_status"] == "overrides_automatic":
                 existing["override_status"] = payload["override_status"]
                 existing["target_id"] = payload["target_id"]
-            existing["substituted_for_id"] = existing["substituted_for_id"] or payload[
-                "substituted_for_id"
-            ]
+            existing["substituted_for_id"] = (
+                existing["substituted_for_id"] or payload["substituted_for_id"]
+            )
         return list(prepared.values())
 
     def _rank_working_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:

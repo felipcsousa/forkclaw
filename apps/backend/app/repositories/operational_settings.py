@@ -23,11 +23,7 @@ class OperationalSettingsRepository:
         self.session = session
 
     def get_default_agent(self) -> Agent | None:
-        statement = (
-            select(Agent)
-            .where(Agent.is_default.is_(True))
-            .order_by(Agent.created_at.asc())
-        )
+        statement = select(Agent).where(Agent.is_default.is_(True)).order_by(Agent.created_at.asc())
         return self.session.exec(statement).first()
 
     def get_profile(self, agent_id: str) -> AgentProfile | None:
@@ -85,9 +81,7 @@ class OperationalSettingsRepository:
         return profile
 
     def update_workspace_permissions(self, agent_id: str, workspace_path: str) -> None:
-        workspace_tools = {
-            item.id for item in build_tool_catalog() if item.requires_workspace
-        }
+        workspace_tools = {item.id for item in build_tool_catalog() if item.requires_workspace}
         statement = select(ToolPermission).where(
             ToolPermission.agent_id == agent_id,
             ToolPermission.status == "active",

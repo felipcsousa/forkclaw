@@ -335,7 +335,7 @@ class PromptContextService:
                     SessionSummary.root_session_id == root_session_id,
                     SessionSummary.conversation_id == session_record.conversation_id,
                     SessionSummary.user_scope_key == USER_SCOPE_KEY,
-                )
+                ),
             )
             .order_by(SessionSummary.updated_at.desc(), SessionSummary.created_at.desc())
         )

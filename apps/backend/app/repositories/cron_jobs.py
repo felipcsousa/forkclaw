@@ -169,9 +169,7 @@ class CronJobRepository:
         task_run.finished_at = utc_now()
         if task_run.started_at is not None:
             task_run.duration_ms = int(
-                (
-                    ensure_utc(task_run.finished_at) - ensure_utc(task_run.started_at)
-                ).total_seconds()
+                (ensure_utc(task_run.finished_at) - ensure_utc(task_run.started_at)).total_seconds()
                 * 1000
             )
         task_run.estimated_cost_usd = estimated_cost_usd
