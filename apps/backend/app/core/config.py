@@ -88,13 +88,15 @@ def _build_settings() -> Settings:
         ).resolve(),
         bundled_skills_root=Path(
             os.getenv("APP_BUNDLED_SKILLS_ROOT", backend_root / "app" / "skills" / "bundled")
-        ).expanduser().resolve(),
+        )
+        .expanduser()
+        .resolve(),
         user_skills_root=Path(
             os.getenv("APP_USER_SKILLS_ROOT", Path.home() / ".forkclaw" / "skills")
-        ).expanduser().resolve(),
-        scheduler_poll_interval_seconds=float(
-            os.getenv("SCHEDULER_POLL_INTERVAL_SECONDS", "1.0")
-        ),
+        )
+        .expanduser()
+        .resolve(),
+        scheduler_poll_interval_seconds=float(os.getenv("SCHEDULER_POLL_INTERVAL_SECONDS", "1.0")),
         stale_task_run_seconds=int(os.getenv("STALE_TASK_RUN_SECONDS", "900")),
         secret_backend=os.getenv("APP_SECRET_BACKEND", "keychain"),
         secret_service_name=os.getenv("APP_SECRET_SERVICE_NAME", "nanobot-agent-console"),
@@ -107,13 +109,9 @@ def _build_settings() -> Settings:
         default_monthly_budget_usd=float(os.getenv("DEFAULT_MONTHLY_BUDGET_USD", "200")),
         default_app_view=os.getenv("DEFAULT_APP_VIEW", "chat"),
         default_activity_poll_seconds=int(os.getenv("DEFAULT_ACTIVITY_POLL_SECONDS", "3")),
-        default_heartbeat_interval_seconds=int(
-            os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")
-        ),
+        default_heartbeat_interval_seconds=int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "1800")),
         tool_timeout_seconds=float(os.getenv("TOOL_TIMEOUT_SECONDS", "15.0")),
-        shell_exec_max_timeout_seconds=float(
-            os.getenv("SHELL_EXEC_MAX_TIMEOUT_SECONDS", "60.0")
-        ),
+        shell_exec_max_timeout_seconds=float(os.getenv("SHELL_EXEC_MAX_TIMEOUT_SECONDS", "60.0")),
         shell_exec_max_output_chars=int(os.getenv("SHELL_EXEC_MAX_OUTPUT_CHARS", "12000")),
         shell_exec_allowed_cwd_roots=_read_env_list("SHELL_EXEC_ALLOWED_CWD_ROOTS"),
         shell_exec_allowed_env_keys=_read_env_list(
@@ -146,15 +144,11 @@ def _build_settings() -> Settings:
         subagent_worker_poll_interval_seconds=float(
             os.getenv("SUBAGENT_WORKER_POLL_INTERVAL_SECONDS", "0.2")
         ),
-        subagent_run_timeout_seconds=float(
-            os.getenv("SUBAGENT_RUN_TIMEOUT_SECONDS", "3.0")
-        ),
+        subagent_run_timeout_seconds=float(os.getenv("SUBAGENT_RUN_TIMEOUT_SECONDS", "3.0")),
         subagent_max_run_timeout_seconds=float(
             os.getenv("SUBAGENT_MAX_RUN_TIMEOUT_SECONDS", "30.0")
         ),
-        subagent_stuck_grace_seconds=float(
-            os.getenv("SUBAGENT_STUCK_GRACE_SECONDS", "2.0")
-        ),
+        subagent_stuck_grace_seconds=float(os.getenv("SUBAGENT_STUCK_GRACE_SECONDS", "2.0")),
     )
 
 

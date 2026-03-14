@@ -77,10 +77,7 @@ def _normalize_requested_toolsets(requested_toolsets: list[str]) -> list[str]:
             continue
         if candidate not in SUBAGENT_TOOLSET_MAPPING:
             supported = ", ".join(sorted(SUBAGENT_TOOLSET_MAPPING))
-            msg = (
-                f"Unsupported toolset: {raw_toolset}. "
-                f"Supported toolsets: {supported}."
-            )
+            msg = f"Unsupported toolset: {raw_toolset}. Supported toolsets: {supported}."
             raise ValueError(msg)
         if candidate not in normalized:
             normalized.append(candidate)

@@ -35,12 +35,9 @@ class ToolingRepository:
     def get_task_run_outputs(self, task_run_ids: list[str]) -> dict[str, str | None]:
         if not task_run_ids:
             return {}
-        statement = select(TaskRun.id, TaskRun.output_json).where(
-            TaskRun.id.in_(task_run_ids)
-        )
+        statement = select(TaskRun.id, TaskRun.output_json).where(TaskRun.id.in_(task_run_ids))
         return {
-            task_run_id: output_json
-            for task_run_id, output_json in self.session.exec(statement)
+            task_run_id: output_json for task_run_id, output_json in self.session.exec(statement)
         }
 
     def get_permission(self, agent_id: str, tool_name: str) -> ToolPermission | None:

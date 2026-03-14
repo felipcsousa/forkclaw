@@ -149,8 +149,7 @@ class ActivityService:
             self.repository.list_approvals_for_tasks_or_tool_calls(task_ids, tool_call_ids)
         )
         has_subagent_runs = any(
-            task.kind == "subagent_execution"
-            for _task_run, task, _session, _cron in rows
+            task.kind == "subagent_execution" for _task_run, task, _session, _cron in rows
         )
         lineage_by_task_run = (
             self.repository.list_subagent_lineage_by_task_run_ids(task_run_ids)
@@ -159,9 +158,7 @@ class ActivityService:
         )
 
         approval_ids = [
-            approval.id
-            for approvals in approvals_by_task.values()
-            for approval in approvals
+            approval.id for approvals in approvals_by_task.values() for approval in approvals
         ]
         extra_entity_ids = []
         for lineage in lineage_by_task_run.values():
@@ -278,7 +275,9 @@ class ActivityService:
         session_title = (
             session_record.title
             if session_record is not None
-            else cron_job.name if cron_job else None
+            else cron_job.name
+            if cron_job
+            else None
         )
 
         return ActivityTimelineItemRead(
@@ -365,8 +364,7 @@ class ActivityService:
         context: ActivityPreloadContext,
     ) -> list[Approval]:
         items: dict[str, Approval] = {
-            approval.id: approval
-            for approval in context.approvals_by_task.get(task_id, [])
+            approval.id: approval for approval in context.approvals_by_task.get(task_id, [])
         }
         for tool_call in tool_calls:
             for approval in context.approvals_by_tool_call.get(tool_call.id, []):
@@ -392,10 +390,11 @@ class ActivityService:
         if subagent_lineage is not None:
             subagent_run, child_session, _parent_session = subagent_lineage
             entity_ids.extend([subagent_run.id, child_session.id])
-        events: dict[str, AuditEvent] = {}
-        for entity_id in entity_ids:
-            for event in context.audit_events_by_entity.get(entity_id, []):
-                events.setdefault(event.id, event)
+        events: dict[str, AuditEvent] = {
+            event.id: event
+            for entity_id in set(entity_ids)
+            for event in context.audit_events_by_entity.get(entity_id, [])
+        }
         return sorted(events.values(), key=lambda item: item.created_at)
 
     @staticmethod

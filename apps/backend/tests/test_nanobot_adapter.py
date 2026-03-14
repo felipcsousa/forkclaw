@@ -214,7 +214,7 @@ def test_prompt_builder_renders_sorted_skill_block_with_strategy_and_config() ->
     assert "# Skills" in prompt
     assert "Strategy: all_eligible" in prompt
     assert alpha_index < zebra_index
-    assert "Config: {\"mode\": \"strict\"}" in prompt
+    assert 'Config: {"mode": "strict"}' in prompt
 
 
 def test_prompt_builder_reports_absence_of_selected_skills_but_keeps_resolution_summary() -> None:

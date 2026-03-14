@@ -121,10 +121,7 @@ def parse_schedule(schedule: str, timezone: str) -> ParsedSchedule:
             minute=minute,
         )
 
-    msg = (
-        "Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, "
-        "or `weekly:mon@09:00`."
-    )
+    msg = "Invalid schedule. Use `every:30s`, `every:5m`, `daily:09:00`, or `weekly:mon@09:00`."
     raise ValueError(msg)
 
 

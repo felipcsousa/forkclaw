@@ -12,11 +12,7 @@ class SkillsRepository:
         self.session = session
 
     def get_default_agent(self) -> Agent | None:
-        statement = (
-            select(Agent)
-            .where(Agent.is_default.is_(True))
-            .order_by(Agent.created_at.asc())
-        )
+        statement = select(Agent).where(Agent.is_default.is_(True)).order_by(Agent.created_at.asc())
         return self.session.exec(statement).first()
 
     def get_setting(self, scope: str, key: str) -> Setting | None:

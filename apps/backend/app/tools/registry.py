@@ -148,10 +148,9 @@ class WriteFileTool:
         target.write_text(content, encoding="utf-8")
         return ToolResult(
             output_text=(
-                f"Wrote {len(content)} characters to "
-                f"{target.relative_to(context.workspace_root)}."
+                f"Wrote {len(content)} characters to {target.relative_to(context.workspace_root)}."
             ),
-            output_data={"bytes": len(content.encode('utf-8'))},
+            output_data={"bytes": len(content.encode("utf-8"))},
         )
 
 

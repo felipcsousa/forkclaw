@@ -109,10 +109,7 @@ class ActivityRepository:
             .join(Message, Message.id == ranked_messages.c.message_id)
             .where(ranked_messages.c.row_number == 1)
         )
-        return {
-            task_id: message
-            for task_id, message in self.session.exec(statement)
-        }
+        return {task_id: message for task_id, message in self.session.exec(statement)}
 
     def list_assistant_messages_for_sessions(
         self,

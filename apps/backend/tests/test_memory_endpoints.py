@@ -267,9 +267,7 @@ def test_recall_endpoints_surface_memories_used_for_assistant_responses(
     assert recall_detail["items"][0]["title"] == "Tea preference"
     assert "oolong" in recall_detail["items"][0]["reason"].lower()
 
-    session_recalls_response = test_client.get(
-        f"/memory/recall/sessions/{execution['session_id']}"
-    )
+    session_recalls_response = test_client.get(f"/memory/recall/sessions/{execution['session_id']}")
     assert session_recalls_response.status_code == 200
     session_recalls = session_recalls_response.json()["items"]
     assert session_recalls[0]["assistant_message_id"] == execution["assistant_message_id"]
@@ -349,9 +347,7 @@ def test_recall_history_survives_hard_deleted_memory(test_client: TestClient) ->
     recall_detail_response = test_client.get(
         f"/memory/recall/messages/{execution['assistant_message_id']}"
     )
-    session_recalls_response = test_client.get(
-        f"/memory/recall/sessions/{execution['session_id']}"
-    )
+    session_recalls_response = test_client.get(f"/memory/recall/sessions/{execution['session_id']}")
     recall_log_response = test_client.get("/memory/recall")
 
     assert recall_detail_response.status_code == 200

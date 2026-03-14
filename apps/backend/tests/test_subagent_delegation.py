@@ -292,12 +292,11 @@ def test_serialize_memory_recall_includes_query_text(tmp_path: Path, monkeypatch
 
 def test_split_persisted_context_snapshot_avoids_parent_duplication() -> None:
     snapshot = (
-        "Explicit context:\nFocus on docs.\n\n"
-        "Parent snapshot:\nParent session: Main\n- user: hello"
+        "Explicit context:\nFocus on docs.\n\nParent snapshot:\nParent session: Main\n- user: hello"
     )
 
-    explicit_context, parent_snapshot = (
-        SubagentDelegationService._split_persisted_context_snapshot(snapshot)
+    explicit_context, parent_snapshot = SubagentDelegationService._split_persisted_context_snapshot(
+        snapshot
     )
     prompt = ExecutionRequestBuilder.build_delegated_input(
         goal="Summarize",
@@ -334,9 +333,7 @@ def test_spawned_subagent_is_processed_to_completion_and_posts_parent_summary(
     detail_payload = _wait_for(
         lambda: (
             lambda payload: payload if payload["run"]["lifecycle_status"] == "completed" else None
-        )(
-            test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()
-        ),
+        )(test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()),
     )
 
     assert detail_payload["id"] == child_id
@@ -413,9 +410,7 @@ def test_subagent_uses_only_current_parent_conversation_snapshot_and_writes_scop
     detail_payload = _wait_for(
         lambda: (
             lambda payload: payload if payload["run"]["lifecycle_status"] == "completed" else None
-        )(
-            test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()
-        ),
+        )(test_client.get(f"/sessions/{parent_id}/subagents/{child_id}").json()),
     )
     assert detail_payload is not None
 

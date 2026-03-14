@@ -106,9 +106,7 @@ def _resolve_skill(
 ) -> ResolvedSkill:
     blocked_reasons: list[str] = []
     effective_enabled = (
-        entry_config.enabled
-        if entry_config.enabled is not None
-        else definition.enabled_by_default
+        entry_config.enabled if entry_config.enabled is not None else definition.enabled_by_default
     )
     if not effective_enabled:
         blocked_reasons.append("disabled")
