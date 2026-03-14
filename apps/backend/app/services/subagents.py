@@ -362,8 +362,10 @@ class SubagentDelegationService:
         if run is None:
             return False
 
-        child = self.repository.get_session(run.child_session_id)
-        parent = self.repository.get_session(run.launcher_session_id)
+        sessions = self.repository.get_sessions([run.child_session_id, run.launcher_session_id])
+        child = next((s for s in sessions if s.id == run.child_session_id), None)
+        parent = next((s for s in sessions if s.id == run.launcher_session_id), None)
+
         if child is None or parent is None:
             msg = "Subagent run is missing its session lineage."
             raise ValueError(msg)
