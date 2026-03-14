@@ -1212,7 +1212,30 @@ def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestC
     assert catalog_response.status_code == 200
     catalog_payload = catalog_response.json()
 
-    by_id = {item["id"]: item for item in catalog_payload["items"]}
+    assert "items" in catalog_payload
+    items = catalog_payload["items"]
+    assert len(items) > 0
+
+    # Verify all expected fields from ToolCatalogEntryRead are present
+    first_item = items[0]
+    expected_keys = {
+        "id", "label", "description", "group", "group_label",
+        "risk", "status", "input_schema", "output_schema", "requires_workspace"
+    }
+    assert expected_keys.issubset(first_item.keys())
+
+    # Ensure properties are properly populated
+    assert isinstance(first_item["id"], str)
+    assert isinstance(first_item["label"], str)
+    assert isinstance(first_item["description"], str)
+    assert isinstance(first_item["group"], str)
+    assert isinstance(first_item["group_label"], str)
+    assert isinstance(first_item["risk"], str)
+    assert isinstance(first_item["status"], str)
+    assert isinstance(first_item["input_schema"], dict)
+    assert isinstance(first_item["requires_workspace"], bool)
+
+    by_id = {item["id"]: item for item in items}
     assert by_id["list_files"]["group"] == "group:fs"
     assert by_id["web_search"]["group"] == "group:web"
     assert by_id["web_search"]["status"] == "experimental"
