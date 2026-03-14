@@ -652,7 +652,7 @@ class ToolService(ToolExecutionPort):
                 return int(setting.value_text)
             except ValueError:
                 logger.warning(
-                    "Failed to parse shell_exec_max_output_chars setting: %s. Using default.",
+                    "Failed to parse shell_exec_max_output_chars from setting value '%s'. Using default.",
                     setting.value_text,
                 )
         return get_settings().shell_exec_max_output_chars
@@ -664,7 +664,7 @@ class ToolService(ToolExecutionPort):
                 return float(setting.value_text)
             except ValueError:
                 logger.warning(
-                    "Failed to parse shell_exec_max_timeout_seconds setting: %s. Using default.",
+                    "Failed to parse shell_exec_max_timeout_seconds from setting value '%s'. Using default.",
                     setting.value_text,
                 )
         return get_settings().shell_exec_max_timeout_seconds
