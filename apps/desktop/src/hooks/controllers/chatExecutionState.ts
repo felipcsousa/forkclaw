@@ -703,6 +703,14 @@ export function buildChatTimelineItems({
     }
   }
 
+  const subagentsByRunId = new Map<string | null, SubagentSessionRecord[]>();
+  for (const subagent of subagents) {
+    const launcherId = subagent.run.launcher_task_run_id;
+    const list = subagentsByRunId.get(launcherId) || [];
+    list.push(subagent);
+    subagentsByRunId.set(launcherId, list);
+  }
+
   const renderedRunIds = new Set<string>();
   const items: ChatTimelineItem[] = [];
 
@@ -722,9 +730,7 @@ export function buildChatTimelineItems({
       items.push({
         kind: 'run',
         run,
-        subagents: subagents.filter(
-          (subagent) => subagent.run.launcher_task_run_id === run.taskRunId,
-        ),
+        subagents: subagentsByRunId.get(run.taskRunId) || [],
       });
     }
   }
@@ -737,9 +743,7 @@ export function buildChatTimelineItems({
     items.push({
       kind: 'run',
       run,
-      subagents: subagents.filter(
-        (subagent) => subagent.run.launcher_task_run_id === run.taskRunId,
-      ),
+      subagents: subagentsByRunId.get(run.taskRunId) || [],
     });
   }
 
