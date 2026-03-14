@@ -32,6 +32,10 @@ class SubagentRepository:
         statement = select(SessionRecord).where(SessionRecord.id == session_id)
         return self.session.exec(statement).first()
 
+    def get_sessions(self, session_ids: Sequence[str]) -> list[SessionRecord]:
+        statement = select(SessionRecord).where(SessionRecord.id.in_(session_ids))
+        return list(self.session.exec(statement).all())
+
     def get_task(self, task_id: str | None) -> Task | None:
         if not task_id:
             return None
