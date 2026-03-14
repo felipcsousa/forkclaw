@@ -271,8 +271,7 @@ class MemoryService:
         for item in response.items:
             score_breakdown = item.score_breakdown or {}
             lexical_score = float(score_breakdown.get("lexical") or 0.0)
-            recency_score = float(score_breakdown.get("recency") or 0.0)
-            if lexical_score <= 0.0 or recency_score <= 0.0:
+            if lexical_score <= 0.0:
                 continue
             if item.id in recent_record_ids or item.id in current_ids:
                 continue

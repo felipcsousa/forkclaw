@@ -654,7 +654,7 @@ def test_select_for_recall_applies_runtime_quality_filters_and_temporal_dedupe(
             limit=5,
         )
 
-    assert [candidate.item.id for candidate in candidates] == ["keep-1", "stale-dup"]
+    assert [candidate.item.id for candidate in candidates] == ["keep-1", "old-1", "stale-dup"]
 
 
 def test_runtime_recall_event_persists_query_text(test_client: TestClient) -> None:
