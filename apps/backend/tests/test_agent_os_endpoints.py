@@ -1694,6 +1694,48 @@ def test_activity_timeline_query_budget_is_batched(
     assert len(statements) <= 11
 
 
+def test_cron_jobs_dashboard_empty(test_client: TestClient) -> None:
+    response = test_client.get("/cron-jobs")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["items"], list)
+    assert len(data["items"]) == 0
+    assert isinstance(data["history"], list)
+    assert "heartbeat" in data
+
+
+def test_cron_jobs_dashboard_populated(test_client: TestClient) -> None:
+    # Create a job first
+    create_response = test_client.post(
+        "/cron-jobs",
+        json={
+            "name": "Dashboard Test Job",
+            "schedule": "every:5m",
+            "payload": {"job_type": "review_pending_approvals"},
+        },
+    )
+    assert create_response.status_code == 201
+    job_id = create_response.json()["id"]
+
+    # Verify the dashboard returns the created job
+    response = test_client.get("/cron-jobs")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert isinstance(data["items"], list)
+    assert len(data["items"]) >= 1
+
+    # Check if the created job is in the items
+    dashboard_job = next((item for item in data["items"] if item["id"] == job_id), None)
+    assert dashboard_job is not None
+    assert dashboard_job["name"] == "Dashboard Test Job"
+    assert dashboard_job["schedule"] == "every:5m"
+    assert dashboard_job["payload"]["job_type"] == "review_pending_approvals"
+
+    # Cleanup
+    test_client.delete(f"/cron-jobs/{job_id}")
+
+
 def test_cron_job_can_be_created_and_runs_automatically(test_client: TestClient) -> None:
     create_response = test_client.post(
         "/cron-jobs",
