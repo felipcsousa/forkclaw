@@ -276,9 +276,21 @@ class MemoryService:
             scopes=None,
             limit=max(limit * 4, limit),
         )
+        return self._filter_and_map_candidates(
+            items=response.items,
+            recent_record_ids=recent_record_ids,
+            limit=limit,
+        )
+
+    def _filter_and_map_candidates(
+        self,
+        items: list[MemorySearchItemRead],
+        recent_record_ids: set[str],
+        limit: int,
+    ) -> list[MemoryRecallCandidate]:
         candidates: list[MemoryRecallCandidate] = []
         current_ids: set[str] = set()
-        for item in response.items:
+        for item in items:
             score_breakdown = item.score_breakdown or {}
             lexical_score = float(score_breakdown.get("lexical") or 0.0)
             if lexical_score <= 0.0:
