@@ -1,14 +1,13 @@
 import os
-import sys
 import time
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app.db.session import get_db_session, get_engine
-from app.services.subagents import SubagentDelegationService
-from app.repositories.subagents import SubagentRepository
-from app.models.entities import SessionRecord, SessionSubagentRun, generate_id, utc_now, Agent
 from sqlmodel import SQLModel, select
+
+from app.db.session import get_db_session, get_engine
+from app.models.entities import Agent, SessionRecord, SessionSubagentRun, generate_id, utc_now
+from app.repositories.subagents import SubagentRepository
 
 SQLModel.metadata.create_all(get_engine())
 

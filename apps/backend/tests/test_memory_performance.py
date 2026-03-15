@@ -1,15 +1,16 @@
 import time
-from app.services.memory import MemoryService
-from sqlmodel import Session, select
-from app.models.entities import MemoryRecallLog, MemoryEntry, Agent, SessionSummary, Message
-import pytest
-from app.db.seed import seed_default_data
 from uuid import uuid4
+
+from sqlmodel import Session, select
+
+from app.db.seed import seed_default_data
+from app.models.entities import Agent, MemoryEntry, MemoryRecallLog, Message
+from app.services.memory import MemoryService
 
 
 def test_recall_performance(test_client):
     from sqlalchemy import create_engine
-    from sqlmodel import Session
+
     from app.core.config import get_settings
 
     settings = get_settings()
