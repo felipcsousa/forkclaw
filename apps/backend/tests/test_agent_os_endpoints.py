@@ -2127,6 +2127,16 @@ def test_acp_session_endpoints_work_when_bridge_is_enabled(test_client: TestClie
     assert cancel_response.json()["status"] == "cancelled"
 
 
+def test_acp_create_session_invalid_parent(test_client: TestClient) -> None:
+    test_client.put("/acp/status", json={"enabled": True})
+    response = test_client.post("/acp/sessions", json={
+        "label": "Invalid Parent",
+        "parent_session_id": "non_existent_id"
+    })
+    assert response.status_code == 404
+    assert "invalid parent_session_id" in response.json()["detail"].lower()
+
+
 def test_subagent_runtime_acp_requires_enabled_bridge(test_client: TestClient) -> None:
     parent_response = test_client.post("/sessions", json={"title": "Parent Session"})
     assert parent_response.status_code == 201
