@@ -1,4 +1,3 @@
-import pytest
 from app.core.agent_profile_defaults import summarize_persona
 
 

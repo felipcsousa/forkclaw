@@ -98,9 +98,7 @@ def _insert_memory_entry(
     conversation_id: str | None = None,
 ) -> MemoryEntry:
     with get_db_session() as session:
-        resolved_conversation_id = _resolve_conversation_id(
-            session, conversation_id, session_id
-        )
+        resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
         normalized_source = "autosaved" if source_kind == "automatic" else source_kind
         resolved_scope_type = "episodic" if session_id is not None else "stable"
         resolved_scope_key = _resolve_scope_key(
@@ -153,9 +151,7 @@ def _insert_session_summary(
     conversation_id: str | None = None,
 ) -> SessionSummary:
     with get_db_session() as session:
-        resolved_conversation_id = _resolve_conversation_id(
-            session, conversation_id, session_id
-        )
+        resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
         normalized_source = "summary" if source_kind == "automatic" else source_kind
         item = SessionSummary(
             scope_key=f"session:{session_id or uuid4().hex}",
