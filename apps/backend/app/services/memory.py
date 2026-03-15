@@ -29,6 +29,7 @@ from app.schemas.memory import (
     MemoryRecallDetailRead,
     MemoryRecallItemRead,
     MemoryRecallLogEntryRead,
+    MemorySearchItemRead,
     SessionRecallSummaryRead,
 )
 from app.services.memory_admin_service import MemoryAdminService
@@ -284,58 +285,61 @@ class MemoryService:
                 continue
             if item.id in recent_record_ids or item.id in current_ids:
                 continue
-            title = item.title or item.summary or item.body or "Memory"
-            scope = self._scope_label_from_key(item.origin.scope_key)
-            kind = (
-                "session_summary"
-                if item.record_type == "session_summary"
-                else self._kind_from_scope_type(
-                    item.origin.scope_type,
-                )
-            )
-            source_label = self._source_label(
-                item.source_kind,
-                is_override=item.override.status == "overrides_automatic",
-            )
-            importance = self._importance_label(item.importance)
-            origin_session_id = item.origin.session_id
-            origin_subagent_session_id = (
-                item.origin.session_id
-                if item.origin.session_id
-                and item.origin.root_session_id
-                and item.origin.session_id != item.origin.root_session_id
-                else None
-            )
-            reason = self._recall_reason(item)
-            candidates.append(
-                MemoryRecallCandidate(
-                    item=MemoryItemRead(
-                        id=item.id,
-                        kind=kind,
-                        title=title,
-                        content=item.body or item.summary or "",
-                        scope=scope,
-                        source_kind=item.source_kind,
-                        source_label=source_label,
-                        importance=importance,
-                        state="active",
-                        recall_status="active",
-                        is_manual=self._is_user_managed(item.source_kind),
-                        is_override=item.override.status == "overrides_automatic",
-                        origin_session_id=origin_session_id,
-                        origin_subagent_session_id=origin_subagent_session_id,
-                        original_memory_id=item.override.target_id,
-                        created_at=utc_now(),
-                        updated_at=utc_now(),
-                    ),
-                    reason=reason,
-                    score=item.score,
-                )
-            )
+
+            candidate = self._map_recall_candidate(item)
+            candidates.append(candidate)
             current_ids.add(item.id)
             if len(candidates) >= limit:
                 break
         return candidates
+
+    def _map_recall_candidate(self, item: MemorySearchItemRead) -> MemoryRecallCandidate:
+        title = item.title or item.summary or item.body or "Memory"
+        scope = self._scope_label_from_key(item.origin.scope_key)
+        kind = (
+            "session_summary"
+            if item.record_type == "session_summary"
+            else self._kind_from_scope_type(
+                item.origin.scope_type,
+            )
+        )
+        source_label = self._source_label(
+            item.source_kind,
+            is_override=item.override.status == "overrides_automatic",
+        )
+        importance = self._importance_label(item.importance)
+        origin_session_id = item.origin.session_id
+        origin_subagent_session_id = (
+            item.origin.session_id
+            if item.origin.session_id
+            and item.origin.root_session_id
+            and item.origin.session_id != item.origin.root_session_id
+            else None
+        )
+        reason = self._recall_reason(item)
+        return MemoryRecallCandidate(
+            item=MemoryItemRead(
+                id=item.id,
+                kind=kind,
+                title=title,
+                content=item.body or item.summary or "",
+                scope=scope,
+                source_kind=item.source_kind,
+                source_label=source_label,
+                importance=importance,
+                state="active",
+                recall_status="active",
+                is_manual=self._is_user_managed(item.source_kind),
+                is_override=item.override.status == "overrides_automatic",
+                origin_session_id=origin_session_id,
+                origin_subagent_session_id=origin_subagent_session_id,
+                original_memory_id=item.override.target_id,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            ),
+            reason=reason,
+            score=item.score,
+        )
 
     def inject_recall_context(
         self,
