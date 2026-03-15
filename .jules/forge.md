@@ -1,3 +1,7 @@
+## 2026-03-15 - Missing tests for get_activity_timeline endpoint
+**Gap:** The `/activity/timeline` endpoint lacked test coverage, specifically regarding pagination (limit and cursor) and error handling.
+**Learning:** FastAPI's `response_model_exclude_none=True` omits `None` fields entirely from the returned JSON, meaning assertions must check for absence of keys rather than `is None`. Furthermore, when testing with a persistent SQLite database (or one that isn't fully reset per test), tests requiring a clean slate must explicitly wipe seeded data using raw `DELETE FROM` statements.
+**Action:** Always check `response_model_exclude_none` when asserting against `None` fields in FastAPI JSON responses. Always clear necessary tables explicitly in test setup if `conftest.py` is actively seeding data for the session.
 ## 2024-03-15 - Missing tests for configure_logging
 **Gap:** The function `configure_logging()` in `apps/backend/app/core/logging.py` lacked test coverage, specifically regarding exception formatting, JSON defaults, interaction with `Settings.ensure_data_dir()`, and its behavior on multiple consecutive calls.
 **Learning:** `pytest-cov` is a valuable tool for accurately measuring test coverage and identifying missed branches. Additionally, mocking internal methods on pydantic models or configuration objects directly (e.g., `Settings.ensure_data_dir`) using `monkeypatch.setattr` ensures tests can intercept and monitor executions without triggering actual I/O side effects, although care must be taken to retain the original implementation.
