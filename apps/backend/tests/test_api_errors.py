@@ -36,3 +36,21 @@ def test_value_error_as_http_exception_custom_default_status():
     assert isinstance(http_exc, HTTPException)
     assert http_exc.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     assert http_exc.detail == "Some other error"
+
+
+def test_value_error_as_http_exception_with_custom_default_status_not_found():
+    exc = ValueError("Item not found here")
+    http_exc = value_error_as_http_exception(
+        exc, default_status=status.HTTP_422_UNPROCESSABLE_CONTENT
+    )
+    assert isinstance(http_exc, HTTPException)
+    assert http_exc.status_code == status.HTTP_404_NOT_FOUND
+    assert http_exc.detail == "Item not found here"
+
+
+def test_value_error_as_http_exception_empty_message():
+    exc = ValueError("")
+    http_exc = value_error_as_http_exception(exc)
+    assert isinstance(http_exc, HTTPException)
+    assert http_exc.status_code == status.HTTP_400_BAD_REQUEST
+    assert http_exc.detail == ""
