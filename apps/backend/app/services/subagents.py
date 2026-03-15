@@ -65,14 +65,12 @@ class SubagentDelegationService:
         self.memory_capture = MemoryCaptureService(session)
         self.summary_builder = SubagentCompletionSummaryBuilder()
 
-    def spawn(
+    def _prepare_spawn_params(
         self,
-        *,
         parent_session_id: str,
         payload: SubagentSpawnRequest,
-    ) -> SubagentSpawnResponse:
+    ):
         parent = self._require_spawnable_parent(parent_session_id)
-        settings = get_settings()
         goal = payload.goal.strip()
         goal_summary = self._goal_summary(goal)
         parent_messages = self.repository.list_recent_messages(parent.id)
@@ -89,6 +87,32 @@ class SubagentDelegationService:
             tool_permissions=tool_permissions,
         )
         timeout_seconds = self._normalize_timeout_seconds(payload.timeout_seconds)
+        return (
+            parent,
+            goal,
+            goal_summary,
+            snapshot,
+            launcher_message_id,
+            resolution,
+            timeout_seconds,
+        )
+
+    def spawn(
+        self,
+        *,
+        parent_session_id: str,
+        payload: SubagentSpawnRequest,
+    ) -> SubagentSpawnResponse:
+        (
+            parent,
+            goal,
+            goal_summary,
+            snapshot,
+            launcher_message_id,
+            resolution,
+            timeout_seconds,
+        ) = self._prepare_spawn_params(parent_session_id, payload)
+        settings = get_settings()
         parent, child, _run = self._run_with_sqlite_retry(
             lambda: self._spawn_subagent_immediate(
                 parent_session_id=parent.id,
