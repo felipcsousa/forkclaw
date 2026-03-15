@@ -16,7 +16,7 @@ from app.repositories.agent_profile import AgentProfileRepository
 from app.repositories.tools import ToolingRepository
 from app.schemas.skill import SkillSummaryRead
 from app.schemas.tool import PermissionLevel, ToolCallRead
-from app.tools.base import ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort
+from app.tools.base import ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolResult
 from app.tools.catalog import ToolCatalogEntry, build_tool_catalog
 from app.tools.policies import (
     ToolPolicyProfile,
@@ -29,6 +29,16 @@ from app.tools.registry import build_tool_registry
 from app.tools.web.cache import SqlToolCacheStore
 
 logger = logging.getLogger(__name__)
+
+SERVICE_BACKED_TOOL_NAMES = {
+    "spawn_subagent",
+    "list_subagents",
+    "get_subagent",
+    "cancel_subagent",
+    "acp_enable",
+    "acp_disable",
+    "acp_status",
+}
 
 
 class ToolService(ToolExecutionPort):
@@ -306,6 +316,7 @@ class ToolService(ToolExecutionPort):
             )
 
         return self._execute_and_record_tool_call(
+            request=request,
             agent_id=request.identity.agent_id,
             permission=permission,
             tool_record=tool_record,
@@ -335,6 +346,7 @@ class ToolService(ToolExecutionPort):
             raise ValueError(msg)
 
         return self._execute_and_record_tool_call(
+            request=request,
             agent_id=request.identity.agent_id,
             permission=permission,
             tool_record=tool_record,
@@ -346,6 +358,7 @@ class ToolService(ToolExecutionPort):
     def _execute_and_record_tool_call(
         self,
         *,
+        request: KernelExecutionRequest,
         agent_id: str,
         permission: ToolPermission,
         tool_record,
@@ -369,7 +382,12 @@ class ToolService(ToolExecutionPort):
             )
 
         try:
-            result = self._execute_tool(tool_name, permission, arguments)
+            result = self._execute_tool(
+                request=request,
+                tool_name=tool_name,
+                permission=permission,
+                arguments=arguments,
+            )
         except Exception as exc:
             return self._record_failed_tool_call(
                 agent_id=agent_id,
@@ -389,10 +407,18 @@ class ToolService(ToolExecutionPort):
 
     def _execute_tool(
         self,
+        *,
+        request: KernelExecutionRequest,
         tool_name: str,
         permission: ToolPermission,
         arguments: dict,
     ):
+        if tool_name in SERVICE_BACKED_TOOL_NAMES:
+            return self._execute_service_backed_tool(
+                request=request,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
         tool = self.registry.get(tool_name)
         context = ToolExecutionContext(
             workspace_root=self._context_workspace_root(permission),
@@ -401,6 +427,7 @@ class ToolService(ToolExecutionPort):
                 "tool_timeout_seconds": get_settings().tool_timeout_seconds,
                 "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
                 "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_policy_mode": self._shell_exec_policy_mode(),
                 "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
                 "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
                 "web_search_cache_ttl_seconds": get_settings().web_search_cache_ttl_seconds,
@@ -410,6 +437,100 @@ class ToolService(ToolExecutionPort):
             },
         )
         return tool.execute(context=context, arguments=arguments)
+
+    def _execute_service_backed_tool(
+        self,
+        *,
+        request: KernelExecutionRequest,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        if tool_name == "spawn_subagent":
+            from app.schemas.session import SubagentSpawnRequest
+            from app.services.subagents import SubagentDelegationService
+
+            payload = SubagentSpawnRequest.model_validate(arguments)
+            response = SubagentDelegationService(self.session).spawn(
+                parent_session_id=request.session.session_id,
+                payload=payload,
+            )
+            return ToolResult(
+                output_text=(
+                    f"Spawned {response.runtime} subagent session `{response.child_session_id}`."
+                ),
+                output_data=response.model_dump(mode="json"),
+            )
+
+        if tool_name == "list_subagents":
+            from app.services.subagents import SubagentDelegationService
+
+            response = SubagentDelegationService(self.session).list(request.session.session_id)
+            return ToolResult(
+                output_text=f"Listed {len(response.items)} subagent sessions.",
+                output_data=response.model_dump(mode="json"),
+            )
+
+        if tool_name == "get_subagent":
+            from app.services.subagents import SubagentDelegationService
+
+            child_session_id = str(arguments.get("child_session_id") or "").strip()
+            if not child_session_id:
+                msg = "child_session_id is required."
+                raise ValueError(msg)
+            response = SubagentDelegationService(self.session).get(
+                parent_session_id=request.session.session_id,
+                child_session_id=child_session_id,
+            )
+            return ToolResult(
+                output_text=(
+                    f"Loaded subagent `{child_session_id}` "
+                    f"({response.run.lifecycle_status})."
+                ),
+                output_data=response.model_dump(mode="json"),
+            )
+
+        if tool_name == "cancel_subagent":
+            from app.services.subagents import SubagentDelegationService
+
+            child_session_id = str(arguments.get("child_session_id") or "").strip()
+            if not child_session_id:
+                msg = "child_session_id is required."
+                raise ValueError(msg)
+            response = SubagentDelegationService(self.session).cancel(
+                parent_session_id=request.session.session_id,
+                child_session_id=child_session_id,
+            )
+            return ToolResult(
+                output_text=(
+                    f"Subagent `{child_session_id}` status is `{response.lifecycle_status}`."
+                ),
+                output_data=response.model_dump(mode="json"),
+            )
+
+        from app.services.acp import AcpService
+
+        acp = AcpService(self.session)
+        if tool_name == "acp_enable":
+            enabled = acp.set_enabled(True)
+            return ToolResult(
+                output_text="ACP bridge enabled." if enabled else "ACP bridge disabled.",
+                output_data={"enabled": enabled},
+            )
+        if tool_name == "acp_disable":
+            enabled = acp.set_enabled(False)
+            return ToolResult(
+                output_text="ACP bridge enabled." if enabled else "ACP bridge disabled.",
+                output_data={"enabled": enabled},
+            )
+        if tool_name == "acp_status":
+            enabled = acp.is_enabled()
+            return ToolResult(
+                output_text="ACP bridge is enabled." if enabled else "ACP bridge is disabled.",
+                output_data={"enabled": enabled},
+            )
+
+        msg = f"Unsupported service-backed tool: {tool_name}"
+        raise ValueError(msg)
 
     def _record_tool_started(
         self,
@@ -588,6 +709,7 @@ class ToolService(ToolExecutionPort):
                 "tool_timeout_seconds": get_settings().tool_timeout_seconds,
                 "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
                 "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_policy_mode": self._shell_exec_policy_mode(),
                 "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
                 "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
             },
@@ -617,6 +739,7 @@ class ToolService(ToolExecutionPort):
                 "tool_timeout_seconds": get_settings().tool_timeout_seconds,
                 "shell_exec_max_timeout_seconds": self._shell_exec_max_timeout_seconds(),
                 "shell_exec_max_output_chars": self._shell_exec_max_output_chars(),
+                "shell_exec_policy_mode": self._shell_exec_policy_mode(),
                 "shell_exec_allowed_cwd_roots": self._shell_exec_allowed_cwd_roots(),
                 "shell_exec_allowed_env_keys": self._shell_exec_allowed_env_keys(),
             },
@@ -676,7 +799,10 @@ class ToolService(ToolExecutionPort):
                 return int(setting.value_text)
             except ValueError:
                 logger.warning(
-                    "Failed to parse shell_exec_max_output_chars from setting value '%s'. Using default.",
+                    (
+                        "Failed to parse shell_exec_max_output_chars from "
+                        "setting value '%s'. Using default."
+                    ),
                     setting.value_text,
                 )
         return get_settings().shell_exec_max_output_chars
@@ -688,7 +814,18 @@ class ToolService(ToolExecutionPort):
                 return float(setting.value_text)
             except ValueError:
                 logger.warning(
-                    "Failed to parse shell_exec_max_timeout_seconds from setting value '%s'. Using default.",
+                    (
+                        "Failed to parse shell_exec_max_timeout_seconds from "
+                        "setting value '%s'. Using default."
+                    ),
                     setting.value_text,
                 )
         return get_settings().shell_exec_max_timeout_seconds
+
+    def _shell_exec_policy_mode(self) -> str:
+        setting = self.repository.get_setting("runtime", "shell_exec_policy_mode")
+        if setting and setting.value_text:
+            candidate = setting.value_text.strip()
+            if candidate:
+                return candidate
+        return get_settings().shell_exec_policy_mode
