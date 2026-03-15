@@ -80,6 +80,57 @@ def _resolve_scope_key(
     return "agent:default"
 
 
+def _build_memory_entry(
+    session: Session,
+    *,
+    body: str,
+    title: str | None = None,
+    summary: str | None = None,
+    source_kind: str = "autosaved",
+    importance: float = 0.0,
+    agent_id: str | None = None,
+    session_id: str | None = None,
+    root_session_id: str | None = None,
+    workspace_path: str | None = None,
+    user_scope_key: str | None = None,
+    hidden_from_recall: bool = False,
+    deleted_at=None,
+    override_target_entry_id: str | None = None,
+    conversation_id: str | None = None,
+) -> MemoryEntry:
+    resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
+    normalized_source = "autosaved" if source_kind == "automatic" else source_kind
+    resolved_scope_type = "episodic" if session_id is not None else "stable"
+    resolved_scope_key = _resolve_scope_key(
+        session_id, agent_id, user_scope_key, workspace_path
+    )
+    return MemoryEntry(
+        scope_type=resolved_scope_type,
+        scope_key=resolved_scope_key,
+        lifecycle_state="active",
+        title=title or f"memory-{uuid4().hex[:8]}",
+        body=body,
+        summary=summary,
+        source_kind=normalized_source,
+        importance=importance,
+        confidence=0.5,
+        dedupe_hash=f"dedupe-{uuid4().hex}",
+        created_by="user" if normalized_source == "manual" else "system",
+        updated_by="user" if normalized_source == "manual" else "system",
+        agent_id=agent_id,
+        conversation_id=resolved_conversation_id,
+        session_id=session_id,
+        root_session_id=root_session_id,
+        workspace_path=workspace_path,
+        user_scope_key=user_scope_key,
+        hidden_from_recall=hidden_from_recall,
+        deleted_at=deleted_at,
+        redaction_state="clean",
+        security_state="safe",
+        override_target_entry_id=override_target_entry_id,
+    )
+
+
 def _insert_memory_entry(
     *,
     body: str,
@@ -98,41 +149,63 @@ def _insert_memory_entry(
     conversation_id: str | None = None,
 ) -> MemoryEntry:
     with get_db_session() as session:
-        resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
-        normalized_source = "autosaved" if source_kind == "automatic" else source_kind
-        resolved_scope_type = "episodic" if session_id is not None else "stable"
-        resolved_scope_key = _resolve_scope_key(
-            session_id, agent_id, user_scope_key, workspace_path
-        )
-        entry = MemoryEntry(
-            scope_type=resolved_scope_type,
-            scope_key=resolved_scope_key,
-            lifecycle_state="active",
-            title=title or f"memory-{uuid4().hex[:8]}",
+        entry = _build_memory_entry(
+            session,
             body=body,
+            title=title,
             summary=summary,
-            source_kind=normalized_source,
+            source_kind=source_kind,
             importance=importance,
-            confidence=0.5,
-            dedupe_hash=f"dedupe-{uuid4().hex}",
-            created_by="user" if normalized_source == "manual" else "system",
-            updated_by="user" if normalized_source == "manual" else "system",
             agent_id=agent_id,
-            conversation_id=resolved_conversation_id,
             session_id=session_id,
             root_session_id=root_session_id,
             workspace_path=workspace_path,
             user_scope_key=user_scope_key,
             hidden_from_recall=hidden_from_recall,
             deleted_at=deleted_at,
-            redaction_state="clean",
-            security_state="safe",
             override_target_entry_id=override_target_entry_id,
+            conversation_id=conversation_id,
         )
         session.add(entry)
         session.commit()
         session.refresh(entry)
         return entry
+
+
+def _build_session_summary(
+    session: Session,
+    *,
+    summary: str,
+    source_kind: str = "summary",
+    importance: float = 0.0,
+    agent_id: str | None = None,
+    session_id: str | None = None,
+    root_session_id: str | None = None,
+    workspace_path: str | None = None,
+    user_scope_key: str | None = None,
+    hidden_from_recall: bool = False,
+    deleted_at=None,
+    override_target_summary_id: str | None = None,
+    conversation_id: str | None = None,
+) -> SessionSummary:
+    resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
+    normalized_source = "summary" if source_kind == "automatic" else source_kind
+    return SessionSummary(
+        scope_key=f"session:{session_id or uuid4().hex}",
+        summary_text=summary,
+        source_kind=normalized_source,
+        importance=importance,
+        agent_id=agent_id,
+        conversation_id=resolved_conversation_id,
+        session_id=session_id,
+        root_session_id=root_session_id,
+        created_by="user" if normalized_source == "manual" else "system",
+        workspace_path=workspace_path,
+        user_scope_key=user_scope_key,
+        hidden_from_recall=hidden_from_recall,
+        deleted_at=deleted_at,
+        override_target_summary_id=override_target_summary_id,
+    )
 
 
 def _insert_session_summary(
@@ -151,23 +224,20 @@ def _insert_session_summary(
     conversation_id: str | None = None,
 ) -> SessionSummary:
     with get_db_session() as session:
-        resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
-        normalized_source = "summary" if source_kind == "automatic" else source_kind
-        item = SessionSummary(
-            scope_key=f"session:{session_id or uuid4().hex}",
-            summary_text=summary,
-            source_kind=normalized_source,
+        item = _build_session_summary(
+            session,
+            summary=summary,
+            source_kind=source_kind,
             importance=importance,
             agent_id=agent_id,
-            conversation_id=resolved_conversation_id,
             session_id=session_id,
             root_session_id=root_session_id,
-            created_by="user" if normalized_source == "manual" else "system",
             workspace_path=workspace_path,
             user_scope_key=user_scope_key,
             hidden_from_recall=hidden_from_recall,
             deleted_at=deleted_at,
             override_target_summary_id=override_target_summary_id,
+            conversation_id=conversation_id,
         )
         session.add(item)
         session.commit()
