@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def test_resolve_backend_root_frozen(monkeypatch):
 def test_clear_settings_cache():
     clear_settings_cache()
 
-def test_read_env_list_json_not_list_type(monkeypatch, mocker):
+def test_read_env_list_json_not_list_type(monkeypatch):
     monkeypatch.setenv("TEST_VAR", '["a"]')
-    mocker.patch("json.loads", return_value="not_a_list")
+    monkeypatch.setattr(json, "loads", lambda *_args, **_kwargs: "not_a_list")
     assert _read_env_list("TEST_VAR", default=("x", "y")) == ("x", "y")
