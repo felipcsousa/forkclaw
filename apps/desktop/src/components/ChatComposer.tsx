@@ -39,6 +39,7 @@ export function ChatComposer({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
+              if (disabled || isSending) return;
               onSubmit();
             }
           }}

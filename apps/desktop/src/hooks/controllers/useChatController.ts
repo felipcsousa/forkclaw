@@ -662,6 +662,10 @@ export function useChatController({
 
   const handleSendMessage = useCallback(
     async (afterSend?: (sessionId: string) => Promise<void>) => {
+      if (isSending) {
+        return null;
+      }
+
       const trimmed = draft.trim();
       if (!trimmed) {
         setErrorMessage('Write a message before sending it to the agent.');
@@ -735,7 +739,7 @@ export function useChatController({
 
       return session;
     },
-    [draft, ensureSessionForSend, refreshSessionContext, runAsyncAction, setErrorMessage],
+    [draft, ensureSessionForSend, isSending, refreshSessionContext, runAsyncAction, setErrorMessage],
   );
 
   const activeSubagentIndex = activeSubagent
