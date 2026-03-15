@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.db.session import get_db_session
 from app.models.entities import (
@@ -50,6 +50,36 @@ def _create_session(test_client: TestClient, title: str) -> dict:
     return response.json()
 
 
+def _resolve_conversation_id(
+    session: Session,
+    conversation_id: str | None,
+    session_id: str | None,
+) -> str | None:
+    if conversation_id is not None:
+        return conversation_id
+    if session_id is not None:
+        session_record = session.get(SessionRecord, session_id)
+        return session_record.conversation_id if session_record is not None else None
+    return None
+
+
+def _resolve_scope_key(
+    session_id: str | None,
+    agent_id: str | None,
+    user_scope_key: str | None,
+    workspace_path: str | None,
+) -> str:
+    if session_id is not None:
+        return f"session:{session_id}"
+    if agent_id is not None:
+        return f"agent:{agent_id}"
+    if user_scope_key is not None:
+        return f"user/{user_scope_key}"
+    if workspace_path is not None:
+        return f"workspace:{workspace_path}"
+    return "agent:default"
+
+
 def _insert_memory_entry(
     *,
     body: str,
@@ -68,30 +98,13 @@ def _insert_memory_entry(
     conversation_id: str | None = None,
 ) -> MemoryEntry:
     with get_db_session() as session:
-        resolved_conversation_id = conversation_id
-        if resolved_conversation_id is None and session_id is not None:
-            session_record = session.get(SessionRecord, session_id)
-            resolved_conversation_id = (
-                session_record.conversation_id if session_record is not None else None
-            )
+        resolved_conversation_id = _resolve_conversation_id(
+            session, conversation_id, session_id
+        )
         normalized_source = "autosaved" if source_kind == "automatic" else source_kind
         resolved_scope_type = "episodic" if session_id is not None else "stable"
-        resolved_scope_key = (
-            f"session:{session_id}"
-            if session_id is not None
-            else (
-                f"agent:{agent_id}"
-                if agent_id is not None
-                else (
-                    f"user/{user_scope_key}"
-                    if user_scope_key is not None
-                    else (
-                        f"workspace:{workspace_path}"
-                        if workspace_path is not None
-                        else "agent:default"
-                    )
-                )
-            )
+        resolved_scope_key = _resolve_scope_key(
+            session_id, agent_id, user_scope_key, workspace_path
         )
         entry = MemoryEntry(
             scope_type=resolved_scope_type,
@@ -140,12 +153,9 @@ def _insert_session_summary(
     conversation_id: str | None = None,
 ) -> SessionSummary:
     with get_db_session() as session:
-        resolved_conversation_id = conversation_id
-        if resolved_conversation_id is None and session_id is not None:
-            session_record = session.get(SessionRecord, session_id)
-            resolved_conversation_id = (
-                session_record.conversation_id if session_record is not None else None
-            )
+        resolved_conversation_id = _resolve_conversation_id(
+            session, conversation_id, session_id
+        )
         normalized_source = "summary" if source_kind == "automatic" else source_kind
         item = SessionSummary(
             scope_key=f"session:{session_id or uuid4().hex}",
