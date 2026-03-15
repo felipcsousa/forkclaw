@@ -79,12 +79,7 @@ class MemoryService:
         filtered: list[MemoryItemRead] = []
 
         for item in items:
-            haystack = " ".join(
-                [item.title, item.content, item.scope, item.source_kind, item.source_label]
-            ).lower()
             if kind and item.kind != kind:
-                continue
-            if query_text and query_text not in haystack:
                 continue
             if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
                 continue
@@ -98,6 +93,18 @@ class MemoryService:
                 continue
             if mode == "automatic" and item.is_manual:
                 continue
+            if query_text:
+                haystack = " ".join(
+                    [
+                        item.title or "",
+                        item.content or "",
+                        item.scope or "",
+                        item.source_kind or "",
+                        item.source_label or "",
+                    ]
+                ).lower()
+                if query_text not in haystack:
+                    continue
             filtered.append(item)
 
         return sorted(filtered, key=lambda item: item.updated_at, reverse=True)
@@ -517,7 +524,9 @@ class MemoryService:
 
         missing_ids = [m_id for m_id in unique_ids if m_id not in items_map]
         for chunk in self._iter_lookup_chunks(missing_ids):
-            summaries = self.session.exec(select(SessionSummary).where(SessionSummary.id.in_(chunk)))
+            summaries = self.session.exec(
+                select(SessionSummary).where(SessionSummary.id.in_(chunk))
+            )
             for summary in summaries:
                 items_map[summary.id] = self._read_summary(summary)
 
