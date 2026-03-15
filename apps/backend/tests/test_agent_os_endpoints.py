@@ -1205,8 +1205,16 @@ def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestC
     # Verify all expected fields from ToolCatalogEntryRead are present
     first_item = items[0]
     expected_keys = {
-        "id", "label", "description", "group", "group_label",
-        "risk", "status", "input_schema", "output_schema", "requires_workspace"
+        "id",
+        "label",
+        "description",
+        "group",
+        "group_label",
+        "risk",
+        "status",
+        "input_schema",
+        "output_schema",
+        "requires_workspace",
     }
     assert expected_keys.issubset(first_item.keys())
 

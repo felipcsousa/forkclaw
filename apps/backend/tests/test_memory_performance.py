@@ -6,6 +6,7 @@ import pytest
 from app.db.seed import seed_default_data
 from uuid import uuid4
 
+
 def test_recall_performance(test_client):
     from sqlalchemy import create_engine
     from sqlmodel import Session
@@ -53,7 +54,7 @@ def test_recall_performance(test_client):
             role="assistant",
             content_text="test",
             sequence_number=1,
-            status="committed"
+            status="committed",
         )
         db_session.add(msg)
 
@@ -83,4 +84,6 @@ def test_recall_performance(test_client):
         res = service.recall_for_message(message_id)
         end = time.perf_counter()
 
-        print(f"\nTime taken for recall_for_message with 1000 entries: {(end-start)*1000:.2f}ms")
+        print(
+            f"\nTime taken for recall_for_message with 1000 entries: {(end - start) * 1000:.2f}ms"
+        )

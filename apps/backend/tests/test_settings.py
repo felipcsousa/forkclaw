@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from app.schemas.settings import SettingsListResponse
 
+
 def test_list_settings(test_client: TestClient) -> None:
     response = test_client.get("/settings")
 
