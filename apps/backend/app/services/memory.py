@@ -589,6 +589,28 @@ class MemoryService:
         entry: MemoryEntry,
         payload: MemoryItemUpdate,
     ) -> MemoryItemRead:
+        override = self._build_override_entry(entry, payload)
+
+        entry.hidden_from_recall = True
+        entry.updated_by = "user"
+        entry.updated_at = utc_now()
+
+        self.session.add(entry)
+        created = self.repository.add_entry(override)
+
+        self._record_override_change_logs(entry.id, created.id)
+
+        self.session.commit()
+        self.session.refresh(created)
+        self.session.refresh(entry)
+
+        return self._read_entry(created)
+
+    def _build_override_entry(
+        self,
+        entry: MemoryEntry,
+        payload: MemoryItemUpdate,
+    ) -> MemoryEntry:
         title = (payload.title or entry.title).strip()
         content = (payload.content or entry.body).strip()
         inspected = inspect_manual_text(
@@ -596,7 +618,7 @@ class MemoryService:
             body=content,
             summary=summarize_text(content),
         )
-        override = MemoryEntry(
+        return MemoryEntry(
             agent_id=entry.agent_id,
             scope_type=entry.scope_type,
             scope_key=entry.scope_key,
@@ -629,31 +651,28 @@ class MemoryService:
             origin_task_run_id=entry.origin_task_run_id,
             override_target_entry_id=entry.id,
         )
-        entry.hidden_from_recall = True
-        entry.updated_by = "user"
-        entry.updated_at = utc_now()
-        self.session.add(entry)
-        created = self.repository.add_entry(override)
+
+    def _record_override_change_logs(
+        self,
+        original_entry_id: str,
+        override_entry_id: str,
+    ) -> None:
         self.repository.add_change_log(
-            memory_id=entry.id,
+            memory_id=original_entry_id,
             action="override_created",
             actor_type="user",
             actor_id="memory-studio",
-            before_snapshot={"id": entry.id},
-            after_snapshot={"override_id": created.id},
+            before_snapshot={"id": original_entry_id},
+            after_snapshot={"override_id": override_entry_id},
         )
         self.repository.add_change_log(
-            memory_id=created.id,
+            memory_id=override_entry_id,
             action="create",
             actor_type="user",
             actor_id="memory-studio",
             before_snapshot=None,
-            after_snapshot={"override_target_entry_id": entry.id},
+            after_snapshot={"override_target_entry_id": original_entry_id},
         )
-        self.session.commit()
-        self.session.refresh(created)
-        self.session.refresh(entry)
-        return self._read_entry(created)
 
     def _create_summary_override(
         self,

@@ -12,17 +12,13 @@ from sqlmodel import SQLModel, select
 
 SQLModel.metadata.create_all(get_engine())
 
+
 def setup_data(num_runs):
     with get_db_session() as session:
         repo = SubagentRepository(session)
 
         # Create an agent first to satisfy foreign key constraint
-        agent = Agent(
-            id="test_agent",
-            name="Test Agent",
-            slug="test_agent",
-            status="active"
-        )
+        agent = Agent(id="test_agent", name="Test Agent", slug="test_agent", status="active")
         session.add(agent)
         session.flush()
 
@@ -42,7 +38,7 @@ def setup_data(num_runs):
             model_override=None,
             max_iterations=None,
             timeout_seconds=None,
-            started_at=utc_now()
+            started_at=utc_now(),
         )
         session.add(main_session)
         session.flush()
@@ -56,16 +52,16 @@ def setup_data(num_runs):
                 tool_profile=None,
                 model_override=None,
                 max_iterations=None,
-                timeout_seconds=None
+                timeout_seconds=None,
             )
 
             run = repo.create_subagent_run(
-                launcher_session_id=main_session.id,
-                child_session_id=child.id
+                launcher_session_id=main_session.id, child_session_id=child.id
             )
             session.add(run)
 
         session.commit()
+
 
 def benchmark_baseline():
     num_runs = 1000
@@ -85,6 +81,7 @@ def benchmark_baseline():
 
         elapsed = end_time - start_time
         print(f"Baseline for {num_runs} runs (N+1 queries): {elapsed:.4f} seconds")
+
 
 def benchmark_optimized():
     num_runs = 1000
