@@ -234,7 +234,7 @@ fn wait_for_process_exit(child: &mut Child, timeout: Duration) -> bool {
     false
 }
 
-fn normalize_backend_path() -> String {
+fn normalize_backend_path() -> std::ffi::OsString {
     let mut paths = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect::<Vec<PathBuf>>())
         .unwrap_or_default();
@@ -244,8 +244,5 @@ fn normalize_backend_path() -> String {
             paths.push(path);
         }
     }
-    std::env::join_paths(paths)
-        .ok()
-        .and_then(|value| value.into_string().ok())
-        .unwrap_or_default()
+    std::env::join_paths(paths).unwrap_or_default()
 }

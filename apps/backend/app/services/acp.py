@@ -55,6 +55,11 @@ class AcpService:
         metadata: dict[str, object] | None = None,
     ) -> AcpNewSessionResponse:
         self._ensure_enabled()
+
+        if parent_session_id is not None:
+            if self.agent_os.get_session(parent_session_id) is None:
+                raise ValueError(f"Invalid parent_session_id: '{parent_session_id}' not found.")
+
         if backend_session_id is None and child_session_id is None:
             session_record = self.agent_os.create_session(title=label)
             backend_session_id = session_record.id
