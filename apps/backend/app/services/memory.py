@@ -51,6 +51,8 @@ class MemoryRecallCandidate:
 
 
 class MemoryService:
+    _BATCH_LOOKUP_CHUNK_SIZE = 200
+
     def __init__(self, session: Session):
         self.session = session
         self.repository = MemoryRepository(session)
@@ -506,21 +508,24 @@ class MemoryService:
     def _batch_get_items(self, memory_ids: list[str]) -> dict[str, MemoryItemRead]:
         if not memory_ids:
             return {}
-        unique_ids = list(set(memory_ids))
+        unique_ids = list(dict.fromkeys(memory_ids))
         items_map: dict[str, MemoryItemRead] = {}
-        entries = self.session.exec(select(MemoryEntry).where(MemoryEntry.id.in_(unique_ids)))
-        for entry in entries:
-            items_map[entry.id] = self._read_entry(entry)
+        for chunk in self._iter_lookup_chunks(unique_ids):
+            entries = self.session.exec(select(MemoryEntry).where(MemoryEntry.id.in_(chunk)))
+            for entry in entries:
+                items_map[entry.id] = self._read_entry(entry)
 
         missing_ids = [m_id for m_id in unique_ids if m_id not in items_map]
-        if missing_ids:
-            summaries = self.session.exec(
-                select(SessionSummary).where(SessionSummary.id.in_(missing_ids))
-            )
+        for chunk in self._iter_lookup_chunks(missing_ids):
+            summaries = self.session.exec(select(SessionSummary).where(SessionSummary.id.in_(chunk)))
             for summary in summaries:
                 items_map[summary.id] = self._read_summary(summary)
 
         return items_map
+
+    def _iter_lookup_chunks(self, memory_ids: list[str]):
+        for index in range(0, len(memory_ids), self._BATCH_LOOKUP_CHUNK_SIZE):
+            yield memory_ids[index : index + self._BATCH_LOOKUP_CHUNK_SIZE]
 
     def _create_session_summary_item(self, payload: MemoryItemCreate) -> MemoryItemRead:
         default_agent = self._require_default_agent()

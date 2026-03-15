@@ -701,3 +701,31 @@ def test_runtime_recall_event_persists_query_text(test_client: TestClient) -> No
 
     assert row is not None
     assert row.query_text == "repositories github check"
+
+
+def test_batch_get_items_chunks_large_in_queries() -> None:
+    with get_db_session() as session:
+        service = MemoryService(session)
+        lookup_ids = [f"memory-{index}" for index in range(501)]
+        max_bind_params = 200
+        observed_chunk_sizes: list[int] = []
+
+        def _exec_with_bind_guard(statement, *args, **kwargs):
+            criteria = list(getattr(statement, "_where_criteria", ()))
+            if criteria:
+                right = getattr(criteria[0], "right", None)
+                values = getattr(right, "value", None)
+                if isinstance(values, list):
+                    observed_chunk_sizes.append(len(values))
+                    if len(values) > max_bind_params:
+                        raise AssertionError(
+                            f"Query used {len(values)} bind params; expected <= {max_bind_params}"
+                        )
+            return []
+
+        session.exec = _exec_with_bind_guard  # type: ignore[assignment]
+
+        items = service._batch_get_items(lookup_ids)
+
+    assert items == {}
+    assert observed_chunk_sizes
