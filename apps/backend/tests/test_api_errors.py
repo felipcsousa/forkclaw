@@ -1,4 +1,3 @@
-import pytest
 from fastapi import HTTPException, status
 
 from app.api.errors import value_error_as_http_exception
