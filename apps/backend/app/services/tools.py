@@ -38,6 +38,8 @@ class ToolService(ToolExecutionPort):
         self.registry = build_tool_registry()
         self.catalog = build_tool_catalog()
         self.catalog_tool_names = {item.id for item in self.catalog}
+        self._materialized_agents: set[str] = set()
+        self._cached_permissions: dict[tuple[str, str], ToolPermission | None] = {}
 
     def list_permissions(self) -> tuple[str, list[ToolPermission]]:
         agent = self.agent_repository.get_default_agent()
@@ -87,12 +89,18 @@ class ToolService(ToolExecutionPort):
             value_type="string",
             value_text=profile_id,
         )
+        if agent.id in self._materialized_agents:
+            self._materialized_agents.remove(agent.id)
+        self._cached_permissions.clear()
         self._materialize_permissions(agent.id)
         return self.get_policy()
 
     def update_permission(self, tool_name: str, level: PermissionLevel) -> ToolPermission:
         agent = self._require_default_agent()
         catalog_entry = self._require_catalog_entry(tool_name)
+        if agent.id in self._materialized_agents:
+            self._materialized_agents.remove(agent.id)
+        self._cached_permissions.clear()
         self._materialize_permissions(agent.id)
 
         default_level = resolve_effective_permission_level(
@@ -118,6 +126,9 @@ class ToolService(ToolExecutionPort):
                 override.status = "active"
             self.repository.save_override(override)
 
+        if agent.id in self._materialized_agents:
+            self._materialized_agents.remove(agent.id)
+        self._cached_permissions.clear()
         self._materialize_permissions(agent.id)
         saved = self.repository.get_permission(agent.id, tool_name)
         if saved is None:
@@ -206,8 +217,16 @@ class ToolService(ToolExecutionPort):
                 output_text=f"Tool `{tool_call.name}` is outside the delegated scope.",
             )
 
-        self._materialize_permissions(request.identity.agent_id)
-        permission = self.repository.get_permission(request.identity.agent_id, tool_call.name)
+        agent_id = request.identity.agent_id
+        self._materialize_permissions(agent_id)
+
+        cache_key = (agent_id, tool_call.name)
+        if cache_key in self._cached_permissions:
+            permission = self._cached_permissions[cache_key]
+        else:
+            permission = self.repository.get_permission(agent_id, tool_call.name)
+            self._cached_permissions[cache_key] = permission
+
         tool_record = self.repository.create_tool_call(
             session_id=request.session.session_id,
             message_id=request.runtime.trigger_message_id,
@@ -526,6 +545,9 @@ class ToolService(ToolExecutionPort):
         return profile.id
 
     def _materialize_permissions(self, agent_id: str) -> None:
+        if agent_id in self._materialized_agents:
+            return
+
         profile_id = self._active_profile_id()
         overrides_by_tool = {
             override.tool_name: override.permission_level
@@ -546,6 +568,8 @@ class ToolService(ToolExecutionPort):
                 workspace_path=workspace_root if item.requires_workspace else None,
                 approval_required=level == "ask",
             )
+
+        self._materialized_agents.add(agent_id)
 
     def _context_workspace_root(self, permission: ToolPermission) -> Path:
         if permission.workspace_path:
