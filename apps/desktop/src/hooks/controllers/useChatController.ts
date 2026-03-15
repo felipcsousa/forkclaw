@@ -739,7 +739,7 @@ export function useChatController({
 
       return session;
     },
-    [draft, ensureSessionForSend, refreshSessionContext, runAsyncAction, setErrorMessage],
+    [draft, ensureSessionForSend, isSending, refreshSessionContext, runAsyncAction, setErrorMessage],
   );
 
   const activeSubagentIndex = activeSubagent
