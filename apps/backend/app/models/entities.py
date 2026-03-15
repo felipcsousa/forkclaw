@@ -169,6 +169,44 @@ class SessionSubagentRun(TimestampedModel, table=True):
     error_summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class AcpSession(TimestampedModel, table=True):
+    __tablename__ = "acp_sessions"
+
+    id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
+    session_key: str = Field(
+        sa_column=Column(String(120), nullable=False, unique=True, index=True)
+    )
+    label: str = Field(sa_column=Column(String(200), nullable=False))
+    runtime: str = Field(default="acp", sa_column=Column(String(50), nullable=False, index=True))
+    status: str = Field(default="active", sa_column=Column(String(50), nullable=False, index=True))
+    parent_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    backend_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    child_session_id: str | None = Field(
+        default=None,
+        foreign_key="sessions.id",
+        max_length=36,
+        nullable=True,
+        index=True,
+    )
+    metadata_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    last_prompt_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+
+
 class Message(TimestampedModel, table=True):
     __tablename__ = "messages"
 

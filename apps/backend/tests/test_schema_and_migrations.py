@@ -632,7 +632,7 @@ def test_legacy_0011_revision_upgrades_to_head(tmp_path, monkeypatch) -> None:
             sa.text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert version == "0012_deprecate_legacy_agent_tools"
+    assert version == "0013_acp_sessions_and_shell_policy_defaults"
 
 
 def test_legacy_agent_tools_are_deactivated_by_0012_migration(tmp_path, monkeypatch) -> None:

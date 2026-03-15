@@ -144,6 +144,7 @@ fn start_packaged_backend(app: &AppHandle) -> Result<StartedBackend, Box<dyn std
         .append(true)
         .open(log_dir.join("backend-stderr.log"))?;
     let mut command = Command::new(backend_binary);
+    let normalized_path = normalize_backend_path();
     command
         .env("APP_HOST", "127.0.0.1")
         .env("APP_PORT", port.to_string())
@@ -152,6 +153,7 @@ fn start_packaged_backend(app: &AppHandle) -> Result<StartedBackend, Box<dyn std
         .env("APP_LOG_DIR", &log_dir)
         .env("APP_ARTIFACTS_DIR", &artifacts_dir)
         .env("APP_WORKSPACE_ROOT", &workspace_dir)
+        .env("PATH", normalized_path)
         .stdout(Stdio::from(stdout_log))
         .stderr(Stdio::from(stderr_log));
 
@@ -230,4 +232,20 @@ fn wait_for_process_exit(child: &mut Child, timeout: Duration) -> bool {
         }
     }
     false
+}
+
+fn normalize_backend_path() -> String {
+    let mut paths = std::env::var_os("PATH")
+        .map(|value| std::env::split_paths(&value).collect::<Vec<PathBuf>>())
+        .unwrap_or_default();
+    for candidate in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        let path = PathBuf::from(candidate);
+        if !paths.iter().any(|item| item == &path) {
+            paths.push(path);
+        }
+    }
+    std::env::join_paths(paths)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_default()
 }

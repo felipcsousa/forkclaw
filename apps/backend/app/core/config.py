@@ -37,6 +37,7 @@ class Settings:
     tool_timeout_seconds: float
     shell_exec_max_timeout_seconds: float
     shell_exec_max_output_chars: int
+    shell_exec_policy_mode: str
     shell_exec_allowed_cwd_roots: tuple[str, ...]
     shell_exec_allowed_env_keys: tuple[str, ...]
     web_search_cache_ttl_seconds: int
@@ -113,6 +114,8 @@ def _build_settings() -> Settings:
         tool_timeout_seconds=float(os.getenv("TOOL_TIMEOUT_SECONDS", "15.0")),
         shell_exec_max_timeout_seconds=float(os.getenv("SHELL_EXEC_MAX_TIMEOUT_SECONDS", "60.0")),
         shell_exec_max_output_chars=int(os.getenv("SHELL_EXEC_MAX_OUTPUT_CHARS", "12000")),
+        shell_exec_policy_mode=os.getenv("SHELL_EXEC_POLICY_MODE", "unrestricted").strip()
+        or "unrestricted",
         shell_exec_allowed_cwd_roots=_read_env_list("SHELL_EXEC_ALLOWED_CWD_ROOTS"),
         shell_exec_allowed_env_keys=_read_env_list(
             "SHELL_EXEC_ALLOWED_ENV_KEYS",

@@ -22,6 +22,7 @@ from app.schemas.session import (
     SubagentSpawnResponse,
     SubagentTimelineEventRead,
 )
+from app.services.acp import AcpService
 from app.services.agent_execution import AgentExecutionService
 from app.services.memory_capture_service import MemoryCaptureService
 from app.services.subagent_completion import SubagentCompletionSummaryBuilder
@@ -113,7 +114,11 @@ class SubagentDelegationService:
             timeout_seconds,
         ) = self._prepare_spawn_params(parent_session_id, payload)
         settings = get_settings()
-        parent, child, _run = self._run_with_sqlite_retry(
+        runtime = payload.runtime
+        if runtime == "acp" and not AcpService(self.session).is_enabled():
+            msg = "ACP bridge is disabled. Enable it before spawning an ACP subagent."
+            raise ValueError(msg)
+        parent, child, run = self._run_with_sqlite_retry(
             lambda: self._spawn_subagent_immediate(
                 parent_session_id=parent.id,
                 delegated_goal=goal,
@@ -130,6 +135,24 @@ class SubagentDelegationService:
                 launcher_task_run_id=payload.launcher_task_run_id,
             )
         )
+        if runtime == "acp":
+            run = self._commit_action(
+                lambda: self._mark_run_as_acp_mapped(
+                    run_id=run.id,
+                    child_session_id=child.id,
+                )
+            )
+            AcpService(self.session).create_session(
+                label=child.title,
+                runtime="acp",
+                parent_session_id=parent.id,
+                child_session_id=child.id,
+                metadata={
+                    "spawn_runtime": "acp",
+                    "subagent_run_id": run.id,
+                    "launcher_task_run_id": run.launcher_task_run_id,
+                },
+            )
         self._commit_action(
             lambda: self.repository.record_audit_event(
                 agent_id=parent.agent_id,
@@ -140,8 +163,9 @@ class SubagentDelegationService:
                     parent_session_id=parent.id,
                     child_session_id=child.id,
                     goal_summary=goal_summary,
-                    status="queued",
+                    status="queued" if runtime == "subagent" else "completed",
                     extra={
+                        "runtime": runtime,
                         "spawn_depth": child.spawn_depth,
                         "toolsets": resolution.requested_toolsets,
                         "empty_groups": resolution.empty_groups,
@@ -155,6 +179,7 @@ class SubagentDelegationService:
             parent_session_id=parent.id,
             child_session_id=child.id,
             status="accepted",
+            runtime=runtime,
             spawn_depth=child.spawn_depth,
             toolsets=resolution.requested_toolsets,
             model=child.model_override,
@@ -552,6 +577,34 @@ class SubagentDelegationService:
         settings = get_settings()
         resolved = timeout_seconds or settings.subagent_run_timeout_seconds
         return min(resolved, settings.subagent_max_run_timeout_seconds)
+
+    def _mark_run_as_acp_mapped(
+        self,
+        *,
+        run_id: str,
+        child_session_id: str,
+    ) -> SessionSubagentRun:
+        run = self.repository.get_run(run_id)
+        child = self.repository.get_session(child_session_id)
+        if run is None or child is None:
+            msg = "Subagent run not found for ACP mapping."
+            raise ValueError(msg)
+        now = utc_now()
+        run.lifecycle_status = "completed"
+        run.started_at = run.started_at or now
+        run.finished_at = now
+        run.final_summary = "ACP session mapped and ready for prompt."
+        run.final_output_json = json.dumps(
+            {"status": "mapped", "runtime": "acp", "child_session_id": child_session_id},
+            ensure_ascii=False,
+        )
+        run.updated_at = now
+        child.status = "active"
+        child.summary = "Mapped to ACP bridge."
+        child.updated_at = now
+        self.session.add(child)
+        self.session.add(run)
+        return run
 
     def _run_with_sqlite_retry(self, operation):
         for attempt in range(3):

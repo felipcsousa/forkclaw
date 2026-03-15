@@ -44,6 +44,7 @@ def test_shell_exec_runs_command_inside_workspace(tmp_path: Path) -> None:
         "duration_ms": pytest.approx(result.output_data["duration_ms"], rel=0, abs=500),
         "cwd_resolved": str(project_root.resolve()),
         "truncated": False,
+        "policy": "unrestricted",
     }
 
 
@@ -99,7 +100,7 @@ def test_shell_exec_rejects_cwd_outside_workspace_and_allowlist(tmp_path: Path) 
 
     with pytest.raises(PermissionError, match="allowlist"):
         _shell_tool().execute(
-            context=_context(workspace_root),
+            context=_context(workspace_root, shell_exec_policy_mode="restricted"),
             arguments={"command": "pwd", "cwd": str(forbidden_root)},
         )
 
@@ -125,7 +126,11 @@ def test_shell_exec_rejects_env_keys_outside_allowlist(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError, match="Environment variable"):
         _shell_tool().execute(
-            context=_context(workspace_root, shell_exec_allowed_env_keys=["PATH"]),
+            context=_context(
+                workspace_root,
+                shell_exec_policy_mode="restricted",
+                shell_exec_allowed_env_keys=["PATH"],
+            ),
             arguments={
                 "command": "pwd",
                 "env": {"SECRET_TOKEN": "value"},

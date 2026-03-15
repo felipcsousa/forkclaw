@@ -450,6 +450,256 @@ class WebFetchTool:
         )
 
 
+class SpawnSubagentTool:
+    descriptor = ToolDescriptor(
+        name="spawn_subagent",
+        label="Spawn subagent",
+        description="Spawn a delegated subagent run or ACP-mapped delegated session.",
+        group="group:sessions",
+        risk="high",
+        status="experimental",
+        parameters={
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "Delegated objective for the subagent."},
+                "context": {"type": "string", "description": "Optional context snapshot override."},
+                "runtime": {
+                    "type": "string",
+                    "enum": ["subagent", "acp"],
+                    "description": "Delegation runtime mode.",
+                },
+                "toolsets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Requested delegated toolsets.",
+                },
+                "model": {"type": "string", "description": "Optional model override."},
+                "max_iterations": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Optional iteration cap.",
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Optional runtime timeout.",
+                },
+            },
+            "required": ["goal"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "parent_session_id": {"type": "string"},
+                "child_session_id": {"type": "string"},
+                "status": {"type": "string"},
+                "runtime": {"type": "string"},
+            },
+            "additionalProperties": True,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "spawn_subagent is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class ListSubagentsTool:
+    descriptor = ToolDescriptor(
+        name="list_subagents",
+        label="List subagents",
+        description="List delegated subagent sessions for the current parent session.",
+        group="group:sessions",
+        risk="medium",
+        status="experimental",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        output_schema={
+            "type": "object",
+            "properties": {"items": {"type": "array"}},
+            "additionalProperties": True,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "list_subagents is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class GetSubagentTool:
+    descriptor = ToolDescriptor(
+        name="get_subagent",
+        label="Get subagent",
+        description="Get details for a delegated subagent session.",
+        group="group:sessions",
+        risk="medium",
+        status="experimental",
+        parameters={
+            "type": "object",
+            "properties": {
+                "child_session_id": {
+                    "type": "string",
+                    "description": "Delegated child session identifier.",
+                }
+            },
+            "required": ["child_session_id"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "additionalProperties": True,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "get_subagent is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class CancelSubagentTool:
+    descriptor = ToolDescriptor(
+        name="cancel_subagent",
+        label="Cancel subagent",
+        description="Request cancellation for a delegated subagent session.",
+        group="group:sessions",
+        risk="high",
+        status="experimental",
+        parameters={
+            "type": "object",
+            "properties": {
+                "child_session_id": {
+                    "type": "string",
+                    "description": "Delegated child session identifier.",
+                }
+            },
+            "required": ["child_session_id"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {"lifecycle_status": {"type": "string"}},
+            "additionalProperties": True,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "cancel_subagent is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class AcpEnableTool:
+    descriptor = ToolDescriptor(
+        name="acp_enable",
+        label="ACP enable",
+        description="Enable ACP bridge integration runtime.",
+        group="group:automation",
+        risk="high",
+        status="experimental",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        output_schema={
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+            "additionalProperties": False,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "acp_enable is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class AcpDisableTool:
+    descriptor = ToolDescriptor(
+        name="acp_disable",
+        label="ACP disable",
+        description="Disable ACP bridge integration runtime.",
+        group="group:automation",
+        risk="high",
+        status="experimental",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        output_schema={
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+            "additionalProperties": False,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "acp_disable is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
+class AcpStatusTool:
+    descriptor = ToolDescriptor(
+        name="acp_status",
+        label="ACP status",
+        description="Read ACP bridge runtime status.",
+        group="group:automation",
+        risk="low",
+        status="experimental",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        output_schema={
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+            "additionalProperties": False,
+        },
+        requires_workspace=False,
+    )
+
+    def execute(
+        self,
+        *,
+        context: ToolExecutionContext,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        del context, arguments
+        msg = "acp_status is service-backed and must be executed via ToolService."
+        raise RuntimeError(msg)
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, LocalTool] = {}
@@ -510,6 +760,13 @@ def build_tool_registry() -> ToolRegistry:
     registry.register(ShellExecTool())
     registry.register(WebSearchTool())
     registry.register(WebFetchTool())
+    registry.register(SpawnSubagentTool())
+    registry.register(ListSubagentsTool())
+    registry.register(GetSubagentTool())
+    registry.register(CancelSubagentTool())
+    registry.register(AcpEnableTool())
+    registry.register(AcpDisableTool())
+    registry.register(AcpStatusTool())
     return registry
 
 

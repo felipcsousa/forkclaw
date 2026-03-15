@@ -192,7 +192,6 @@ class NanobotPromptBuilder:
                 f"approval_required={str(tool.approval_required).lower()}, "
                 f"workspace={tool.workspace_path or '(none)'}"
             )
-        lines.append("Simple mode does not execute tools yet; these policies are contextual only.")
         return "\n".join(lines)
 
     @staticmethod
@@ -289,41 +288,73 @@ class NanobotKernelAdapter(AgentKernelPort):
                 format=tool_format,
             )
             if self.tool_executor is not None and available_tools is None
-            else None
+            else available_tools
         )
-        self._raise_if_cancelled()
-        response = await provider.chat(
-            messages=messages,
-            tools=available_tools,
-            model=model_name,
-            max_tokens=1024,
-            temperature=0.2,
-            reasoning_effort=None,
-        )
-        tool_calls = response.tool_calls or []
-        tools_used = [tool_call.name for tool_call in tool_calls]
-        output_text = (response.content or "").strip()
+        max_iterations = self._resolve_max_iterations(request)
+        current_messages = list(messages)
+        iteration_count = 0
+        response: LLMResponse | None = None
+        tool_calls: list[ToolCallRequest] = []
+        tools_used: list[str] = []
+        output_text = ""
         raw_payload_data: dict[str, Any] = {
-            "initial_finish_reason": response.finish_reason,
-            "usage": response.usage,
-            "tools_used": tools_used,
-            "tool_calls": [
-                {
-                    "id": tool_call.id,
-                    "name": tool_call.name,
-                    "arguments": tool_call.arguments,
-                }
-                for tool_call in tool_calls
-            ],
+            "iterations": [],
+            "tools_used": [],
+            "tool_calls": [],
         }
         execution_status = "completed"
         pending_approval_id: str | None = None
         pending_tool_call_id: str | None = None
-        max_iterations = self._resolve_max_iterations(request)
+        tool_outcomes: list[dict[str, Any]] = []
+        exhausted_tool_iteration = False
 
-        if tool_calls and self.tool_executor is not None:
-            tool_messages = []
-            tool_outcomes = []
+        while iteration_count < max_iterations:
+            iteration_count += 1
+            self._raise_if_cancelled()
+            response = await provider.chat(
+                messages=current_messages,
+                tools=available_tools,
+                model=model_name,
+                max_tokens=1024,
+                temperature=0.2,
+                reasoning_effort=None,
+            )
+            output_text = (response.content or "").strip()
+            tool_calls = response.tool_calls or []
+            tool_names = [tool_call.name for tool_call in tool_calls]
+            tools_used.extend(tool_names)
+            raw_payload_data["iterations"].append(
+                {
+                    "index": iteration_count,
+                    "finish_reason": response.finish_reason,
+                    "usage": response.usage,
+                    "tool_calls": [
+                        {
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                        }
+                        for tool_call in tool_calls
+                    ],
+                }
+            )
+            if tool_calls:
+                raw_payload_data["tool_calls"].extend(
+                    [
+                        {
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                        }
+                        for tool_call in tool_calls
+                    ]
+                )
+            if not tool_calls:
+                break
+            if self.tool_executor is None:
+                break
+
+            tool_messages: list[dict[str, Any]] = []
             for tool_call in tool_calls:
                 self._raise_if_cancelled()
                 outcome = self.tool_executor.execute_tool_call(
@@ -362,30 +393,35 @@ class NanobotKernelAdapter(AgentKernelPort):
                     }
                 )
 
-            raw_payload_data["tool_outcomes"] = tool_outcomes
-            if max_iterations > 1:
-                raw_payload_data["follow_up_messages"] = tool_messages
-                self._raise_if_cancelled()
-                follow_up = await provider.chat(
-                    messages=[*messages, *tool_messages],
-                    tools=None,
-                    model=model_name,
-                    max_tokens=1024,
-                    temperature=0.2,
-                    reasoning_effort=None,
-                )
-                output_text = (follow_up.content or "").strip()
-                raw_payload_data["follow_up_finish_reason"] = follow_up.finish_reason
-                raw_payload_data["follow_up_usage"] = follow_up.usage
-            elif tool_messages:
-                output_text = str(tool_messages[-1]["content"]).strip()
-                raw_payload_data["follow_up_skipped"] = "max_iterations_reached"
+            if tool_messages:
+                current_messages.extend(tool_messages)
 
-        if not output_text and tools_used:
-            output_text = (
-                "Model requested tools but simple mode does not execute them: "
-                + ", ".join(tools_used)
-            )
+            if execution_status in {"awaiting_approval", "failed"}:
+                if tool_messages:
+                    output_text = str(tool_messages[-1]["content"]).strip()
+                break
+
+            if iteration_count >= max_iterations:
+                exhausted_tool_iteration = True
+                if tool_messages:
+                    output_text = str(tool_messages[-1]["content"]).strip()
+                break
+
+        if response is None:
+            msg = "The kernel failed to produce a response."
+            raise RuntimeError(msg)
+
+        if tools_used:
+            raw_payload_data["tools_used"] = list(dict.fromkeys(tools_used))
+        if tool_outcomes:
+            raw_payload_data["tool_outcomes"] = tool_outcomes
+        if tools_used:
+            raw_payload_data["follow_up_finish_reason"] = response.finish_reason
+        if exhausted_tool_iteration:
+            raw_payload_data["follow_up_skipped"] = "max_iterations_reached"
+
+        if not output_text and tools_used and self.tool_executor is None:
+            output_text = "Model requested tools, but no tool executor is available."
         if not output_text:
             output_text = "The kernel returned an empty response."
 
@@ -397,7 +433,7 @@ class NanobotKernelAdapter(AgentKernelPort):
             finish_reason=response.finish_reason,
             kernel_name=self.kernel_name,
             model_name=model_name,
-            tools_used=tools_used,
+            tools_used=list(dict.fromkeys(tools_used)),
             raw_payload=raw_payload,
             pending_approval_id=pending_approval_id,
             pending_tool_call_id=pending_tool_call_id,

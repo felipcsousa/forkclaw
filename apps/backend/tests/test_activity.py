@@ -1,10 +1,22 @@
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.db.session import get_db_session
 from app.models.entities import Task, TaskRun
 from app.repositories.activity import ActivityRepository
+from app.repositories.cron_jobs import CronJobRepository
+
+
+def _suppress_scheduler_heartbeat(session: Session) -> None:
+    CronJobRepository(session).upsert_setting(
+        scope="heartbeat",
+        key="last_run_at",
+        value_type="string",
+        value_text=datetime.now(UTC).isoformat(),
+    )
 
 
 def test_get_activity_timeline_empty(test_client: TestClient):
@@ -13,13 +25,14 @@ def test_get_activity_timeline_empty(test_client: TestClient):
         session.execute(text("DELETE FROM audit_events"))
         session.execute(text("DELETE FROM task_runs"))
         session.execute(text("DELETE FROM tasks"))
+        _suppress_scheduler_heartbeat(session)
         session.commit()
 
     response = test_client.get("/activity/timeline")
     assert response.status_code == 200
     data = response.json()
     assert data["items"] == []
-    # Note: By default, FastAPI's response_model_exclude_none=True will omit next_cursor if it's None.
+    # FastAPI may omit `next_cursor` when it is None.
     assert "next_cursor" not in data or data["next_cursor"] is None
 
 
@@ -29,6 +42,7 @@ def test_get_activity_timeline_with_items(test_client: TestClient):
         session.execute(text("DELETE FROM audit_events"))
         session.execute(text("DELETE FROM task_runs"))
         session.execute(text("DELETE FROM tasks"))
+        _suppress_scheduler_heartbeat(session)
         session.commit()
 
         repo = ActivityRepository(session)
