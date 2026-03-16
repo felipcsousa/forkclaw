@@ -71,28 +71,53 @@ class MemoryService:
         recall_status: str | None = None,
         mode: str = "all",
     ) -> list[MemoryItemRead]:
-        items = [
-            *[self._read_entry(entry) for entry in self.session.exec(select(MemoryEntry))],
-            *[self._read_summary(summary) for summary in self.session.exec(select(SessionSummary))],
-        ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
+
+        # Optimization: Push filtering into SQL to avoid fetching all rows into memory
+
+        # Generator for MemoryEntry
+        def generate_entries():
+            if kind and kind not in ("memory_entry", "stable", "working"):
+                return
+            query = select(MemoryEntry)
+            if source_kind:
+                query = query.where(MemoryEntry.source_kind == source_kind)
+            if mode == "manual":
+                query = query.where(MemoryEntry.source_kind == "manual")
+            elif mode == "automatic":
+                query = query.where(MemoryEntry.source_kind != "manual")
+
+            for entry in self.session.exec(query):
+                yield self._read_entry(entry)
+
+        # Generator for SessionSummary
+        def generate_summaries():
+            if kind and kind not in ("session_summary", "stable", "working"):
+                return
+            query = select(SessionSummary)
+            if source_kind:
+                query = query.where(SessionSummary.source_kind == source_kind)
+            if mode == "manual":
+                query = query.where(SessionSummary.source_kind == "manual")
+            elif mode == "automatic":
+                query = query.where(SessionSummary.source_kind != "manual")
+
+            for summary in self.session.exec(query):
+                yield self._read_summary(summary)
+
+        import itertools
+        items = itertools.chain(generate_entries(), generate_summaries())
 
         for item in items:
             if kind and item.kind != kind:
                 continue
             if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
                 continue
-            if source_kind and item.source_kind != source_kind:
-                continue
             if not self._matches_state_filter(item, state):
                 continue
             if recall_status and item.recall_status != recall_status:
-                continue
-            if mode == "manual" and not item.is_manual:
-                continue
-            if mode == "automatic" and item.is_manual:
                 continue
             if query_text:
                 haystack = " ".join(
