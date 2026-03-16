@@ -368,6 +368,7 @@ def test_recall_history_survives_hard_deleted_memory(test_client: TestClient) ->
     assert recall_log["items"][0]["memory_id"] == memory_id
     assert recall_log["items"][0]["title"] == "Deleted memory"
 
+
 def test_delete_memory_item_endpoint(test_client: TestClient) -> None:
     _enable_memory_v1(manual_crud=True, hard_delete=True)
 
@@ -391,22 +392,29 @@ def test_delete_memory_item_endpoint(test_client: TestClient) -> None:
     del_res_hard = test_client.delete(f"/memory/items/{item_id}?hard=true")
     assert del_res_hard.status_code == 204
 
-def test_delete_memory_item_endpoint_returns_json(test_client: TestClient) -> None:
+
+def test_memory_items_can_be_promoted_and_demoted(test_client: TestClient) -> None:
     _enable_memory_v1(manual_crud=True, hard_delete=True)
 
     create_response = test_client.post(
         "/memory/items",
         json={
             "kind": "stable",
-            "title": "Travel preferences 2",
-            "content": "Prefers aisle seats and morning departures.",
+            "title": "Promote demote preference",
+            "content": "A preference to test importance changes.",
             "scope": "profile",
-            "importance": "high",
+            "importance": "medium",
         },
     )
 
+    assert create_response.status_code == 201
     created = create_response.json()
-    item_id = created["id"]
+    assert created["importance"] == "medium"
 
-    del_res_soft = test_client.delete(f"/memory/items/{item_id}")
-    assert del_res_soft.json()["state"] == "deleted"
+    demote_response = test_client.post(f"/memory/items/{created['id']}/demote")
+    assert demote_response.status_code == 200
+    assert demote_response.json()["kind"] == "episodic"
+
+    promote_response = test_client.post(f"/memory/items/{created['id']}/promote")
+    assert promote_response.status_code == 200
+    assert promote_response.json()["kind"] == "stable"
