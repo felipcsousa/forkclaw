@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { MemoryStudioView } from './MemoryStudioView';
 
 function makeMemory(overrides: Record<string, unknown> = {}) {
@@ -91,7 +92,11 @@ describe('MemoryStudioView', () => {
   it('renders tabs, memory rows, and row actions for the studio', () => {
     const memory = makeMemoryController();
 
-    render(<MemoryStudioView memory={memory as never} />);
+    render(
+      <TooltipProvider>
+        <MemoryStudioView memory={memory as never} />
+      </TooltipProvider>
+    );
 
     expect(screen.getByRole('tab', { name: 'All Memories' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Stable Memory' })).toBeInTheDocument();
@@ -114,22 +119,28 @@ describe('MemoryStudioView', () => {
       recallLog: [makeRecall()],
     });
 
-    const { rerender } = render(<MemoryStudioView memory={memory as never} />);
+    const { rerender } = render(
+      <TooltipProvider>
+        <MemoryStudioView memory={memory as never} />
+      </TooltipProvider>
+    );
 
     expect(screen.getByText('Memory recall log')).toBeInTheDocument();
     expect(screen.getByText('Tea preference')).toBeInTheDocument();
 
     rerender(
-      <MemoryStudioView
-        memory={
-          makeMemoryController({
-            activeTab: 'all',
-            memoryItems: [],
-            modeFilter: 'manual',
-            recallLog: [],
-          }) as never
-        }
-      />,
+      <TooltipProvider>
+        <MemoryStudioView
+          memory={
+            makeMemoryController({
+              activeTab: 'all',
+              memoryItems: [],
+              modeFilter: 'manual',
+              recallLog: [],
+            }) as never
+          }
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByText('No manual memories yet')).toBeInTheDocument();
