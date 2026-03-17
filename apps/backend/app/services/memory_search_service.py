@@ -276,9 +276,29 @@ class MemorySearchService:
         return list(prepared.values())
 
     def _rank_working_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        now = self._now()
+        one_day = timedelta(days=1)
+        seven_days = timedelta(days=7)
+        thirty_days = timedelta(days=30)
+
         for item in items:
             candidate = item["candidate"]
-            recency_boost = self._recency_boost(candidate)
+
+            age = (
+                candidate.updated_at
+                if candidate.updated_at > candidate.created_at
+                else candidate.created_at
+            )
+            elapsed = now - age
+            if elapsed <= one_day:
+                recency_boost = 0.6
+            elif elapsed <= seven_days:
+                recency_boost = 0.3
+            elif elapsed <= thirty_days:
+                recency_boost = 0.1
+            else:
+                recency_boost = 0.0
+
             manual_boost = 0.75 if candidate.source_kind == "manual" else 0.0
             importance_boost = candidate.importance
             pre_duplicate = (
@@ -470,18 +490,6 @@ class MemorySearchService:
         normalized_query = " ".join(tokens)
         fts_query = " OR ".join(f'"{token}"' for token in tokens)
         return query_text, normalized_query, fts_query
-
-    @staticmethod
-    def _recency_boost(candidate: MemoryCandidate) -> float:
-        age = max(candidate.updated_at, candidate.created_at)
-        elapsed = MemorySearchService._now() - age
-        if elapsed <= timedelta(days=1):
-            return 0.6
-        if elapsed <= timedelta(days=7):
-            return 0.3
-        if elapsed <= timedelta(days=30):
-            return 0.1
-        return 0.0
 
     @staticmethod
     def _candidate_from_override_row(
