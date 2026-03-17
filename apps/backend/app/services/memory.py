@@ -71,29 +71,93 @@ class MemoryService:
         recall_status: str | None = None,
         mode: str = "all",
     ) -> list[MemoryItemRead]:
-        items = [
-            *[self._read_entry(entry) for entry in self.session.exec(select(MemoryEntry))],
-            *[self._read_summary(summary) for summary in self.session.exec(select(SessionSummary))],
-        ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
 
-        for item in items:
-            if kind and item.kind != kind:
+        # BOLT OPTIMIZATION: Defer expensive Pydantic model conversions and string operations.
+        # Instead of immediately converting all database rows into MemoryItemRead objects,
+        # we evaluate fast boolean and property checks against the raw ORM objects first.
+        # This significantly reduces overhead for large datasets by only executing the
+        # expensive _read_entry / _read_summary and haystack search for items that match.
+        def passes_fast_filters(
+            obj_kind, obj_scope_key, obj_source_kind, obj_deleted_at, obj_hidden
+        ):
+            if kind and obj_kind != kind:
+                return False
+
+            if normalized_scope:
+                scope_label = self._scope_label_from_key(obj_scope_key)
+                if self._normalize_label(scope_label) != normalized_scope:
+                    return False
+
+            if source_kind and obj_source_kind != source_kind:
+                return False
+
+            obj_state = "deleted" if obj_deleted_at is not None else "active"
+            obj_recall = "hidden" if obj_hidden else "active"
+
+            if state == "hidden":
+                if obj_state == "deleted" or obj_recall != "hidden":
+                    return False
+            elif state == "deleted":
+                if obj_state != "deleted":
+                    return False
+            elif state == "active" or state is None:
+                if obj_state != "active":
+                    return False
+
+            if recall_status and obj_recall != recall_status:
+                return False
+
+            if obj_kind == "session_summary":
+                is_manual = obj_source_kind == "manual"
+            else:
+                is_manual = self._is_user_managed(obj_source_kind)
+
+            if mode == "manual" and not is_manual:
+                return False
+            if mode == "automatic" and is_manual:
+                return False
+
+            return True
+
+        for entry in self.session.exec(select(MemoryEntry)):
+            if not passes_fast_filters(
+                self._kind_from_scope_type(entry.scope_type),
+                entry.scope_key,
+                entry.source_kind,
+                entry.deleted_at,
+                entry.hidden_from_recall
+            ):
                 continue
-            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
+
+            item = self._read_entry(entry)
+            if query_text:
+                haystack = " ".join(
+                    [
+                        item.title or "",
+                        item.content or "",
+                        item.scope or "",
+                        item.source_kind or "",
+                        item.source_label or "",
+                    ]
+                ).lower()
+                if query_text not in haystack:
+                    continue
+            filtered.append(item)
+
+        for summary in self.session.exec(select(SessionSummary)):
+            if not passes_fast_filters(
+                "session_summary",
+                summary.scope_key,
+                summary.source_kind,
+                summary.deleted_at,
+                summary.hidden_from_recall
+            ):
                 continue
-            if source_kind and item.source_kind != source_kind:
-                continue
-            if not self._matches_state_filter(item, state):
-                continue
-            if recall_status and item.recall_status != recall_status:
-                continue
-            if mode == "manual" and not item.is_manual:
-                continue
-            if mode == "automatic" and item.is_manual:
-                continue
+
+            item = self._read_summary(summary)
             if query_text:
                 haystack = " ".join(
                     [
