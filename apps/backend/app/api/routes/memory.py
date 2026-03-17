@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
 from app.api.errors import value_error_as_http_exception
@@ -399,18 +399,18 @@ def demote_memory_item(
         raise _memory_http_exception(exc) from exc
 
 
-@router.delete("/memory/items/{memory_id}", status_code=status.HTTP_200_OK, response_model=None)
+@router.delete("/memory/items/{memory_id}", response_model=MemoryDeleteResponse | MemoryItemRead)
 def delete_memory_item(
     memory_id: str,
     hard: bool = Query(default=False),
     session: Session = Depends(get_session),
-) -> MemoryItemRead | Response:
+) -> MemoryDeleteResponse | MemoryItemRead:
     try:
         deleted = MemoryService(session).delete_item(memory_id, hard=hard)
     except Exception as exc:  # noqa: BLE001
         raise _memory_http_exception(exc) from exc
     if hard:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return MemoryDeleteResponse(deleted=True)
     return deleted
 
 

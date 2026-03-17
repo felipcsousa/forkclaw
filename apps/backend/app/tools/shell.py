@@ -50,9 +50,7 @@ class ShellExecTool:
     descriptor = ToolDescriptor(
         name="shell_exec",
         label="Shell exec",
-        description=(
-            "Execute a local shell command with unrestricted cwd and environment policy."
-        ),
+        description=("Execute a local shell command with unrestricted cwd and environment policy."),
         group="group:runtime",
         risk="high",
         status="experimental",
@@ -165,8 +163,10 @@ class ShellExecTool:
 
         preferred_shell = os.environ.get("SHELL", "").strip()
         shell_binary = (
-            shutil.which(preferred_shell) if preferred_shell else None
-        ) or shutil.which("bash") or shutil.which("sh")
+            (shutil.which(preferred_shell) if preferred_shell else None)
+            or shutil.which("bash")
+            or shutil.which("sh")
+        )
         if shell_binary is None:
             raise ShellExecRuntimeError("No supported shell binary (`bash` or `sh`) is available.")
 

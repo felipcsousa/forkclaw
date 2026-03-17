@@ -174,7 +174,8 @@ def test_memory_items_can_be_created_filtered_and_audited(test_client: TestClien
         f"/memory/items/{created['id']}",
         params={"hard": "true"},
     )
-    assert hard_delete_response.status_code == 204
+    assert hard_delete_response.status_code == 200
+    assert hard_delete_response.json()["deleted"] is True
 
     detail_after_hard_delete = test_client.get(f"/memory/items/{created['id']}")
     assert detail_after_hard_delete.status_code == 404
@@ -342,7 +343,8 @@ def test_recall_history_survives_hard_deleted_memory(test_client: TestClient) ->
         f"/memory/items/{memory_id}",
         params={"hard": "true"},
     )
-    assert hard_delete_response.status_code == 204
+    assert hard_delete_response.status_code == 200
+    assert hard_delete_response.json()["deleted"] is True
 
     recall_detail_response = test_client.get(
         f"/memory/recall/messages/{execution['assistant_message_id']}"
