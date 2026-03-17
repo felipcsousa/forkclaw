@@ -10,3 +10,8 @@
 **Gap:** `build_tool_catalog` and `catalog_entry_from_descriptor` in `app/tools/catalog.py` had no explicit tests to verify correct attribute mapping or ordering of tools.
 **Learning:** `build_tool_catalog` relies heavily on an external registry dependency. Mocking it using `unittest.mock.patch` allows us to verify alphabetical sorting and correctness independently of the tools registered in the default catalog.
 **Action:** When adding or checking testing coverage for functions iterating over registry items, isolate the iteration logic using patched mock dependencies.
+
+## 2026-03-17 - AgentOSService Edge Case and Domain Constraint Testing Gap
+**Gap**: Missing service-level edge-case error tests for core `AgentOSService` session operations (`reset_session_conversation`, `create_session` missing agents).
+**Learning**: Service tests that don't cover default bootstrapping states (e.g. what if there's no default agent) or domain constraints (only "main" sessions can be reset) leave gaps that can hide edge case failures. Relying solely on endpoint tests often skips these edge branches inside the service implementation.
+**Action**: Explicitly write localized service-level tests that handle negative scenarios (such as manually unseeding default database defaults) and strictly assert on entity constraints like `session.kind` exceptions.
