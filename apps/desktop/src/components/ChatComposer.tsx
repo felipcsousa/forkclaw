@@ -1,4 +1,4 @@
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -54,7 +54,11 @@ export function ChatComposer({
             disabled={disabled}
             size="sm"
           >
-            <ArrowUp className="h-3.5 w-3.5" />
+            {isSending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5" />
+            )}
             {isSending ? 'Sending…' : 'Send'}
           </Button>
         </div>
