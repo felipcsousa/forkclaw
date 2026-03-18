@@ -173,9 +173,7 @@ class AcpSession(TimestampedModel, table=True):
     __tablename__ = "acp_sessions"
 
     id: str = Field(default_factory=generate_id, primary_key=True, max_length=36)
-    session_key: str = Field(
-        sa_column=Column(String(120), nullable=False, unique=True, index=True)
-    )
+    session_key: str = Field(sa_column=Column(String(120), nullable=False, unique=True, index=True))
     label: str = Field(sa_column=Column(String(200), nullable=False))
     runtime: str = Field(default="acp", sa_column=Column(String(50), nullable=False, index=True))
     status: str = Field(default="active", sa_column=Column(String(50), nullable=False, index=True))

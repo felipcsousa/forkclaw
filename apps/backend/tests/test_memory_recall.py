@@ -101,9 +101,7 @@ def _build_memory_entry(
     resolved_conversation_id = _resolve_conversation_id(session, conversation_id, session_id)
     normalized_source = "autosaved" if source_kind == "automatic" else source_kind
     resolved_scope_type = "episodic" if session_id is not None else "stable"
-    resolved_scope_key = _resolve_scope_key(
-        session_id, agent_id, user_scope_key, workspace_path
-    )
+    resolved_scope_key = _resolve_scope_key(session_id, agent_id, user_scope_key, workspace_path)
     return MemoryEntry(
         scope_type=resolved_scope_type,
         scope_key=resolved_scope_key,

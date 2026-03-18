@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
+import httpx
 import pytest
+import respx
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
@@ -218,3 +221,106 @@ def test_web_search_requires_brave_api_key(
         ).one()
 
     assert tool_call.status == "failed"
+
+
+@respx.mock
+def test_fetch_web_document_html_success() -> None:
+    from app.tools.web.fetch import fetch_web_document
+
+    url = "https://example.com/test-article"
+    html_content = (
+        "<html><head><title>My Title</title></head>"
+        "<body><main><p>Important text</p></main></body></html>"
+    )
+
+    mock_response = httpx.Response(200, text=html_content, headers={"content-type": "text/html"})
+    respx.get(url).mock(return_value=mock_response)
+
+    with patch("app.tools.web.fetch.socket.getaddrinfo") as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [(0, 0, 0, "", ("8.8.8.8", 80))]
+        result = fetch_web_document(
+            url=url,
+            extract_mode="text",
+            max_chars=1000,
+            timeout_seconds=5.0,
+            max_response_bytes=1024 * 1024,
+        )
+
+    assert result["url"] == url
+    assert result["title"] == "My Title"
+    assert result["content"] == "Important text"
+    assert result["truncated"] is False
+    assert result["extract_mode"] == "text"
+
+
+@respx.mock
+def test_fetch_web_document_text_plain_truncation() -> None:
+    from app.tools.web.fetch import fetch_web_document
+
+    url = "https://example.com/test.txt"
+    text_content = "Line 1\nLine 2\nLine 3"
+    mock_response = httpx.Response(200, text=text_content, headers={"content-type": "text/plain"})
+    respx.get(url).mock(return_value=mock_response)
+
+    with patch("app.tools.web.fetch.socket.getaddrinfo") as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [(0, 0, 0, "", ("8.8.8.8", 80))]
+        result = fetch_web_document(
+            url=url,
+            extract_mode="text",
+            max_chars=10,  # Less than length of text_content
+            timeout_seconds=5.0,
+            max_response_bytes=1024 * 1024,
+        )
+
+    assert result["url"] == url
+    assert result["title"] == "example.com"
+    assert result["content"] == "Line 1\nLin"
+    assert result["truncated"] is True
+    assert result["extract_mode"] == "text"
+
+
+@respx.mock
+def test_fetch_web_document_unsupported_content_type() -> None:
+    from app.tools.web.fetch import fetch_web_document
+
+    url = "https://example.com/image.png"
+    mock_response = httpx.Response(200, content=b"fakeimage", headers={"content-type": "image/png"})
+    respx.get(url).mock(return_value=mock_response)
+
+    with patch("app.tools.web.fetch.socket.getaddrinfo") as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [(0, 0, 0, "", ("8.8.8.8", 80))]
+        with pytest.raises(ValueError, match="Unsupported content type for web_fetch"):
+            fetch_web_document(
+                url=url,
+                extract_mode="text",
+                max_chars=1000,
+                timeout_seconds=5.0,
+                max_response_bytes=1024 * 1024,
+            )
+
+
+@respx.mock
+def test_fetch_web_document_exceeds_max_bytes() -> None:
+    from app.tools.web.fetch import fetch_web_document
+
+    url = "https://example.com/large-file"
+
+    def byte_stream():
+        yield b"chunk1"
+        yield b"chunk2"
+
+    mock_response = httpx.Response(
+        200, content=byte_stream(), headers={"content-type": "text/html"}
+    )
+    respx.get(url).mock(return_value=mock_response)
+
+    with patch("app.tools.web.fetch.socket.getaddrinfo") as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [(0, 0, 0, "", ("8.8.8.8", 80))]
+        with pytest.raises(ValueError, match="Response body exceeded the configured safety limit"):
+            fetch_web_document(
+                url=url,
+                extract_mode="text",
+                max_chars=1000,
+                timeout_seconds=5.0,
+                max_response_bytes=5,  # Exceeded by "chunk1"
+            )
