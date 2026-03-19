@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session
@@ -276,9 +276,10 @@ class MemorySearchService:
         return list(prepared.values())
 
     def _rank_working_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        now = self._now()
         for item in items:
             candidate = item["candidate"]
-            recency_boost = self._recency_boost(candidate)
+            recency_boost = self._recency_boost(candidate, now)
             manual_boost = 0.75 if candidate.source_kind == "manual" else 0.0
             importance_boost = candidate.importance
             pre_duplicate = (
@@ -472,9 +473,9 @@ class MemorySearchService:
         return query_text, normalized_query, fts_query
 
     @staticmethod
-    def _recency_boost(candidate: MemoryCandidate) -> float:
+    def _recency_boost(candidate: MemoryCandidate, now: datetime) -> float:
         age = max(candidate.updated_at, candidate.created_at)
-        elapsed = MemorySearchService._now() - age
+        elapsed = now - age
         if elapsed <= timedelta(days=1):
             return 0.6
         if elapsed <= timedelta(days=7):
