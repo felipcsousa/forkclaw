@@ -483,8 +483,7 @@ class ToolService(ToolExecutionPort):
             )
             return ToolResult(
                 output_text=(
-                    f"Loaded subagent `{child_session_id}` "
-                    f"({response.run.lifecycle_status})."
+                    f"Loaded subagent `{child_session_id}` ({response.run.lifecycle_status})."
                 ),
                 output_data=response.model_dump(mode="json"),
             )
