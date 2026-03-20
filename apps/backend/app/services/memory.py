@@ -176,11 +176,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.hidden_from_recall = True
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def restore_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -194,11 +190,7 @@ class MemoryService:
         summary = self._require_summary(memory_id)
         summary.hidden_from_recall = False
         summary.deleted_at = None
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def promote_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -207,11 +199,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.importance = min(summary.importance + 0.3, 1.0)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def demote_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -220,11 +208,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.importance = max(summary.importance - 0.3, 0.0)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def delete_item(self, memory_id: str, *, hard: bool) -> MemoryItemRead | None:
         entry = self.repository.get_entry(memory_id)
@@ -241,11 +225,7 @@ class MemoryService:
             return None
         summary.deleted_at = utc_now()
         summary.hidden_from_recall = True
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def history_for_item(self, memory_id: str) -> list[MemoryHistoryEntryRead]:
         entry = self.repository.get_entry(memory_id)
@@ -574,10 +554,21 @@ class MemoryService:
             origin_task_run_id=None,
             override_target_summary_id=None,
         )
+        return self._save_summary(summary, title_override=payload.title, update_timestamp=False)
+
+    def _save_summary(
+        self,
+        summary: SessionSummary,
+        *,
+        title_override: str | None = None,
+        update_timestamp: bool = True,
+    ) -> MemoryItemRead:
+        if update_timestamp:
+            summary.updated_at = utc_now()
         self.session.add(summary)
         self.session.commit()
         self.session.refresh(summary)
-        return self._read_summary(summary, title_override=payload.title)
+        return self._read_summary(summary, title_override=title_override)
 
     def _update_manual_summary(
         self,
@@ -590,11 +581,7 @@ class MemoryService:
             summary.importance = self._importance_score(payload.importance)
         if payload.scope is not None:
             summary.scope_key = self._scope_key_from_label(payload.scope)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary, title_override=payload.title)
+        return self._save_summary(summary, title_override=payload.title)
 
     def _create_entry_override(
         self,
