@@ -399,7 +399,12 @@ def demote_memory_item(
         raise _memory_http_exception(exc) from exc
 
 
-@router.delete("/memory/items/{memory_id}", status_code=status.HTTP_200_OK, response_model=None)
+@router.delete(
+    "/memory/items/{memory_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=MemoryItemRead,
+    response_model_exclude_none=True,
+)
 def delete_memory_item(
     memory_id: str,
     hard: bool = Query(default=False),
