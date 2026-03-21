@@ -367,3 +367,46 @@ def test_recall_history_survives_hard_deleted_memory(test_client: TestClient) ->
     recall_log = recall_log_response.json()["items"][0]
     assert recall_log["items"][0]["memory_id"] == memory_id
     assert recall_log["items"][0]["title"] == "Deleted memory"
+
+def test_delete_memory_item_endpoint(test_client: TestClient) -> None:
+    _enable_memory_v1(manual_crud=True, hard_delete=True)
+
+    create_response = test_client.post(
+        "/memory/items",
+        json={
+            "kind": "stable",
+            "title": "Travel preferences",
+            "content": "Prefers aisle seats and morning departures.",
+            "scope": "profile",
+            "importance": "high",
+        },
+    )
+
+    created = create_response.json()
+    item_id = created["id"]
+
+    del_res_soft = test_client.delete(f"/memory/items/{item_id}")
+    assert del_res_soft.status_code == 200
+
+    del_res_hard = test_client.delete(f"/memory/items/{item_id}?hard=true")
+    assert del_res_hard.status_code == 204
+
+def test_delete_memory_item_endpoint_returns_json(test_client: TestClient) -> None:
+    _enable_memory_v1(manual_crud=True, hard_delete=True)
+
+    create_response = test_client.post(
+        "/memory/items",
+        json={
+            "kind": "stable",
+            "title": "Travel preferences 2",
+            "content": "Prefers aisle seats and morning departures.",
+            "scope": "profile",
+            "importance": "high",
+        },
+    )
+
+    created = create_response.json()
+    item_id = created["id"]
+
+    del_res_soft = test_client.delete(f"/memory/items/{item_id}")
+    assert del_res_soft.json()["state"] == "deleted"
