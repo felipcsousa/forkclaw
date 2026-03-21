@@ -17,10 +17,10 @@ def test_recall_performance(test_client):
     engine = create_engine(settings.database_url)
 
     with Session(engine) as db_session:
-        agent = db_session.exec(select(Agent).where(Agent.is_default)).first()
+        agent = db_session.exec(select(Agent).where(Agent.is_default == True)).first()
         if not agent:
             seed_default_data(db_session)
-            agent = db_session.exec(select(Agent).where(Agent.is_default)).first()
+            agent = db_session.exec(select(Agent).where(Agent.is_default == True)).first()
 
         service = MemoryService(db_session)
 
@@ -82,7 +82,7 @@ def test_recall_performance(test_client):
 
         # Measure baseline
         start = time.perf_counter()
-        service.recall_for_message(message_id)
+        res = service.recall_for_message(message_id)
         end = time.perf_counter()
 
         print(

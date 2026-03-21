@@ -73,8 +73,8 @@ def benchmark_baseline():
         start_time = time.perf_counter()
 
         for run in runs:
-            repo.get_session(run.child_session_id)
-            repo.get_session(run.launcher_session_id)
+            child = repo.get_session(run.child_session_id)
+            parent = repo.get_session(run.launcher_session_id)
 
         end_time = time.perf_counter()
 
@@ -93,8 +93,8 @@ def benchmark_optimized():
 
         for run in runs:
             sessions = repo.get_sessions([run.child_session_id, run.launcher_session_id])
-            next((s for s in sessions if s.id == run.child_session_id), None)
-            next((s for s in sessions if s.id == run.launcher_session_id), None)
+            child = next((s for s in sessions if s.id == run.child_session_id), None)
+            parent = next((s for s in sessions if s.id == run.launcher_session_id), None)
 
         end_time = time.perf_counter()
 
