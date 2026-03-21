@@ -161,11 +161,9 @@ class MemoryAdminService:
             deleted_at=None,
         )
         created = self.repository.add_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=created.id,
             action="create",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=None,
             after_snapshot=self._snapshot(created),
         )
@@ -201,11 +199,9 @@ class MemoryAdminService:
             entry.source_kind = "user_override"
         entry.updated_by = "user"
         saved = self.repository.save_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="edit",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -217,11 +213,9 @@ class MemoryAdminService:
         entry.hidden_from_recall = hidden
         entry.updated_by = "user"
         saved = self.repository.save_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="hide_from_recall" if hidden else "unhide_from_recall",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -244,11 +238,9 @@ class MemoryAdminService:
             relation_kind=saved.source_kind,
             created_by="user",
         )
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="promote",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -260,11 +252,9 @@ class MemoryAdminService:
         entry.scope_type = "episodic"
         entry.updated_by = "user"
         saved = self.repository.save_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="demote",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -277,11 +267,9 @@ class MemoryAdminService:
         entry.deleted_at = datetime.now(UTC)
         entry.updated_by = "user"
         saved = self.repository.save_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="soft_delete",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -294,11 +282,9 @@ class MemoryAdminService:
         entry.deleted_at = None
         entry.updated_by = "user"
         saved = self.repository.save_entry(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=saved.id,
             action="restore",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=self._snapshot(saved),
         )
@@ -307,16 +293,31 @@ class MemoryAdminService:
     def _hard_delete(self, memory_id: str) -> dict[str, bool]:
         entry = self._require_entry(memory_id)
         before = self._snapshot(entry)
-        self.repository.add_change_log(
+        self._log_change(
             memory_id=entry.id,
             action="hard_delete",
-            actor_type="user",
-            actor_id="api",
             before_snapshot=before,
             after_snapshot=None,
         )
         self.repository.delete_entry(entry)
         return {"deleted": True}
+
+    def _log_change(
+        self,
+        *,
+        memory_id: str,
+        action: str,
+        before_snapshot: dict[str, Any] | None,
+        after_snapshot: dict[str, Any] | None,
+    ) -> None:
+        self.repository.add_change_log(
+            memory_id=memory_id,
+            action=action,
+            actor_type="user",
+            actor_id="api",
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+        )
 
     def _require_entry(self, memory_id: str) -> MemoryEntry:
         entry = self.repository.get_entry(memory_id)
