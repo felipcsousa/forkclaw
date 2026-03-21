@@ -10,18 +10,10 @@
 **Gap:** `build_tool_catalog` and `catalog_entry_from_descriptor` in `app/tools/catalog.py` had no explicit tests to verify correct attribute mapping or ordering of tools.
 **Learning:** `build_tool_catalog` relies heavily on an external registry dependency. Mocking it using `unittest.mock.patch` allows us to verify alphabetical sorting and correctness independently of the tools registered in the default catalog.
 **Action:** When adding or checking testing coverage for functions iterating over registry items, isolate the iteration logic using patched mock dependencies.
+## 2024-03-16 - Testing Memory Importance via Admin Endpoints
+**Gap:** The memory item `/promote` and `/demote` endpoints lacked integration test coverage to assert the underlying semantic shifts from "stable" to "episodic" scopes mapping to importance levels.
+**Learning:** For memory entries, promoting an item functionally switches its `scope_type` mapping underneath, which is returned through `MemoryItemRead.kind`. In testing, adjusting "importance" metrics using `promote/demote` requires verifying `kind` instead of numerical or textual `importance` properties directly, because memory administration handles these state transitions via "stable" vs "episodic" scope types.
+**Action:** When writing tests that manipulate semantic properties (like promoting/demoting memory or changing scopes), verify the domain-specific enumerated mappings (like `kind="stable"`) on the updated response model, not just the raw integer or label property.
 
-## 2026-03-20 - [Session Reset Contract Validation]
-**Gap:** The `/sessions/{session_id}/reset` endpoint had no test coverage for error boundaries, meaning breaking changes to how `ValueError`s from `AgentOSService.reset_session_conversation` were mapped to HTTP 400s (or how `ensure_main_session` handled non-existent/subagent sessions) would go undetected.
-**Learning:** In the FastAPI routing layer, exceptions raised by deep service logic (like `AgentOSService`) are often caught and translated via `value_error_as_http_exception`. Testing these translation boundaries ensures API contracts remain stable even if underlying validation messages change.
-**Action:** When adding new FastAPI endpoints that perform domain validation, always include negative test cases that explicitly trigger those domain errors (e.g., via mocking or invalid state setup) to verify the correct HTTP status code is returned.
 
-## 2026-03-17 - AgentOSService Edge Case and Domain Constraint Testing Gap
-**Gap**: Missing service-level edge-case error tests for core `AgentOSService` session operations (`reset_session_conversation`, `create_session` missing agents).
-**Learning**: Service tests that don't cover default bootstrapping states (e.g. what if there's no default agent) or domain constraints (only "main" sessions can be reset) leave gaps that can hide edge case failures. Relying solely on endpoint tests often skips these edge branches inside the service implementation.
-**Action**: Explicitly write localized service-level tests that handle negative scenarios (such as manually unseeding default database defaults) and strictly assert on entity constraints like `session.kind` exceptions.
 
-## 2026-03-19 - Test tool registry and web providers
-**Gap:** The local utility tool registry (`app/tools/registry.py`) and provider implementations (like `BraveWebSearchProvider`) had virtually no test coverage (40-60%), leaving caching behavior, error handling, and parameter parsing vulnerable to regressions.
-**Learning:** These components depend heavily on file system operations, external network requests, and system commands (like clipboard). This requires extensive use of `unittest.mock` to mock `pathlib.Path`, `subprocess.run`, and `httpx.Client` reliably without relying on the host environment.
-**Action:** When testing system-level or external-facing utility tools, always utilize `patch` (for `subprocess` and `httpx`) and `MagicMock` (for `ToolExecutionContext` and `Path`) to simulate success and failure boundaries deterministically without actual side effects.
