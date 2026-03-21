@@ -17,10 +17,7 @@ def test_get_provider_api_key_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "get_password", mock_get_password)
 
-    with pytest.raises(
-        SecretStoreError,
-        match="System keychain is unavailable. Configure a supported credential store.",
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Configure a supported credential store."):
         store.get_provider_api_key("openai")
 
 
@@ -31,10 +28,7 @@ def test_set_provider_api_key_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "set_password", mock_set_password)
 
-    with pytest.raises(
-        SecretStoreError,
-        match="System keychain is unavailable. Could not save the provider API key.",
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Could not save the provider API key."):
         store.set_provider_api_key("openai", "sk-12345")
 
 
@@ -45,10 +39,7 @@ def test_delete_provider_api_key_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "delete_password", mock_delete_password)
 
-    with pytest.raises(
-        SecretStoreError,
-        match="System keychain is unavailable. Could not delete the provider API key.",
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Could not delete the provider API key."):
         store.delete_provider_api_key("openai")
 
 
@@ -69,10 +60,7 @@ def test_get_skill_env_value_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "get_password", mock_get_password)
 
-    with pytest.raises(
-        SecretStoreError,
-        match="System keychain is unavailable. Configure a supported credential store.",
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Configure a supported credential store."):
         store.get_skill_env_value("test_skill", "API_KEY")
 
 
@@ -83,9 +71,7 @@ def test_set_skill_env_value_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "set_password", mock_set_password)
 
-    with pytest.raises(
-        SecretStoreError, match="System keychain is unavailable. Could not save the skill secret."
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Could not save the skill secret."):
         store.set_skill_env_value("test_skill", "API_KEY", "value")
 
 
@@ -96,9 +82,7 @@ def test_delete_skill_env_value_errors(store, monkeypatch, error_class):
 
     monkeypatch.setattr(keyring, "delete_password", mock_delete_password)
 
-    with pytest.raises(
-        SecretStoreError, match="System keychain is unavailable. Could not delete the skill secret."
-    ):
+    with pytest.raises(SecretStoreError, match="System keychain is unavailable. Could not delete the skill secret."):
         store.delete_skill_env_value("test_skill", "API_KEY")
 
 
