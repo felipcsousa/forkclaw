@@ -64,6 +64,7 @@ class SubagentCountsRead(BaseModel):
 class SubagentSpawnRequest(BaseModel):
     goal: str = PydanticField(min_length=1)
     context: str | None = None
+    runtime: Literal["subagent", "acp"] = "subagent"
     toolsets: list[str] = PydanticField(default_factory=list)
     model: str | None = None
     max_iterations: int | None = PydanticField(default=None, ge=1)
@@ -85,6 +86,7 @@ class SubagentSpawnResponse(BaseModel):
     parent_session_id: str
     child_session_id: str
     status: Literal["accepted"]
+    runtime: Literal["subagent", "acp"] = "subagent"
     spawn_depth: int
     toolsets: list[str]
     model: str | None

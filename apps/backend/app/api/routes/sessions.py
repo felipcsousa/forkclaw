@@ -29,6 +29,17 @@ from app.services.subagents import SubagentDelegationService
 router = APIRouter(tags=["sessions"])
 
 
+def ensure_main_session(
+    session_id: str,
+    session: Session = Depends(get_session),
+) -> None:
+    subagents = SubagentDelegationService(session)
+    try:
+        subagents.ensure_main_session_interaction_allowed(session_id)
+    except ValueError as exc:
+        raise value_error_as_http_exception(exc) from exc
+
+
 @router.get("/sessions", response_model=SessionsListResponse, response_model_exclude_none=True)
 def list_sessions(
     include_subagent_counts: bool = False,
@@ -89,12 +100,8 @@ def get_session_by_id(
 def reset_session_conversation(
     session_id: str,
     session: Session = Depends(get_session),
+    _: None = Depends(ensure_main_session),
 ) -> SessionRead:
-    subagents = SubagentDelegationService(session)
-    try:
-        subagents.ensure_main_session_interaction_allowed(session_id)
-    except ValueError as exc:
-        raise value_error_as_http_exception(exc) from exc
 
     service = AgentOSService(session)
     try:
@@ -115,12 +122,8 @@ def list_session_messages(
     limit: int | None = Query(default=None, ge=1, le=200),
     before_sequence: int | None = Query(default=None, ge=1),
     session: Session = Depends(get_session),
+    _: None = Depends(ensure_main_session),
 ) -> SessionMessagesResponse:
-    subagents = SubagentDelegationService(session)
-    try:
-        subagents.ensure_main_session_interaction_allowed(session_id)
-    except ValueError as exc:
-        raise value_error_as_http_exception(exc) from exc
 
     service = AgentOSService(session)
     record, messages, has_more, next_before_sequence = service.list_session_messages(
@@ -149,12 +152,8 @@ def post_session_message(
     session_id: str,
     payload: SessionMessageCreate,
     session: Session = Depends(get_session),
+    _: None = Depends(ensure_main_session),
 ) -> AgentExecutionResponse:
-    subagents = SubagentDelegationService(session)
-    try:
-        subagents.ensure_main_session_interaction_allowed(session_id)
-    except ValueError as exc:
-        raise value_error_as_http_exception(exc) from exc
 
     service = AgentExecutionService(session)
 
@@ -177,12 +176,8 @@ def post_session_message_async(
     session_id: str,
     payload: SessionMessageCreate,
     session: Session = Depends(get_session),
+    _: None = Depends(ensure_main_session),
 ) -> AgentExecutionAcceptedResponse:
-    subagents = SubagentDelegationService(session)
-    try:
-        subagents.ensure_main_session_interaction_allowed(session_id)
-    except ValueError as exc:
-        raise value_error_as_http_exception(exc) from exc
 
     service = AgentExecutionService(session)
 
@@ -202,14 +197,9 @@ async def stream_session_events(
     request: Request,
     task_run_id: str | None = Query(default=None),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    _: None = Depends(ensure_main_session),
 ) -> StreamingResponse:
     with get_db_session() as session:
-        subagents = SubagentDelegationService(session)
-        try:
-            subagents.ensure_main_session_interaction_allowed(session_id)
-        except ValueError as exc:
-            raise value_error_as_http_exception(exc) from exc
-
         if AgentOSService(session).get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found.")
 

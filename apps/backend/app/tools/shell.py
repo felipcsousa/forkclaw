@@ -34,6 +34,7 @@ class ShellExecutionPreview:
     command: str
     cwd_resolved: str
     cwd_policy: str
+    policy_mode: str
     env_keys: list[str]
     timeout_seconds: float
     session_id: str | None = None
@@ -50,7 +51,7 @@ class ShellExecTool:
         name="shell_exec",
         label="Shell exec",
         description=(
-            "Execute a local shell command inside the workspace or an allowlisted host path."
+            "Execute a local shell command with unrestricted cwd and environment policy."
         ),
         group="group:runtime",
         risk="high",
@@ -91,6 +92,7 @@ class ShellExecTool:
                 "duration_ms": {"type": "integer"},
                 "cwd_resolved": {"type": "string"},
                 "truncated": {"type": "boolean"},
+                "policy": {"type": "string"},
             },
             "additionalProperties": False,
         },
@@ -110,6 +112,7 @@ class ShellExecTool:
             workspace_root=context.workspace_root,
             requested_cwd=arguments.get("cwd"),
             allowed_roots=config.allowed_cwd_roots,
+            policy_mode=config.policy_mode,
         )
         timeout_seconds = _resolve_timeout(
             arguments.get("timeout_seconds"),
@@ -117,6 +120,7 @@ class ShellExecTool:
             max_seconds=config.max_timeout_seconds,
         )
         _build_allowed_env(
+            policy_mode=config.policy_mode,
             requested_env=requested_env,
             allowed_env_keys=config.allowed_env_keys,
         )
@@ -124,6 +128,7 @@ class ShellExecTool:
             command=command,
             cwd_resolved=str(cwd_resolved),
             cwd_policy=cwd_policy,
+            policy_mode=config.policy_mode,
             env_keys=sorted(requested_env),
             timeout_seconds=timeout_seconds,
         )
@@ -139,7 +144,8 @@ class ShellExecTool:
         timeout_text = int(preview.timeout_seconds)
         return (
             f"shell_exec(command={preview.command!r}, cwd={preview.cwd_resolved}, "
-            f"cwd_policy={preview.cwd_policy}, timeout_seconds={timeout_text}, env_keys={env_keys})"
+            f"cwd_policy={preview.cwd_policy}, policy={preview.policy_mode}, "
+            f"timeout_seconds={timeout_text}, env_keys={env_keys})"
         )
 
     def execute(
@@ -152,19 +158,23 @@ class ShellExecTool:
         config = _ShellExecConfig.from_runtime_settings(context.runtime_settings)
         requested_env = _read_env_map(arguments.get("env"))
         env = _build_allowed_env(
+            policy_mode=config.policy_mode,
             requested_env=requested_env,
             allowed_env_keys=config.allowed_env_keys,
         )
 
-        shell_binary = shutil.which("bash") or shutil.which("sh")
+        preferred_shell = os.environ.get("SHELL", "").strip()
+        shell_binary = (
+            shutil.which(preferred_shell) if preferred_shell else None
+        ) or shutil.which("bash") or shutil.which("sh")
         if shell_binary is None:
             raise ShellExecRuntimeError("No supported shell binary (`bash` or `sh`) is available.")
 
         started_at = time.perf_counter()
         try:
-            command = [shell_binary, "-c", preview.command]
-            if "bash" in Path(shell_binary).name:
-                command = [shell_binary, "--noprofile", "--norc", "-c", preview.command]
+            command = [shell_binary, "-lc", preview.command]
+            if Path(shell_binary).name == "sh":
+                command = [shell_binary, "-c", preview.command]
             completed = subprocess.run(
                 command,
                 cwd=preview.cwd_resolved,
@@ -199,6 +209,7 @@ class ShellExecTool:
             "duration_ms": duration_ms,
             "cwd_resolved": preview.cwd_resolved,
             "truncated": stdout_truncated or stderr_truncated,
+            "policy": config.policy_mode,
         }
         return ToolResult(
             output_text=_format_shell_summary(payload),
@@ -208,6 +219,7 @@ class ShellExecTool:
 
 @dataclass(frozen=True)
 class _ShellExecConfig:
+    policy_mode: str
     default_timeout_seconds: float
     max_timeout_seconds: float
     max_output_chars: int
@@ -219,6 +231,8 @@ class _ShellExecConfig:
         raw_allowed_roots = runtime_settings.get("shell_exec_allowed_cwd_roots", [])
         raw_allowed_env = runtime_settings.get("shell_exec_allowed_env_keys", ["PATH"])
         return cls(
+            policy_mode=str(runtime_settings.get("shell_exec_policy_mode", "unrestricted")).strip()
+            or "unrestricted",
             default_timeout_seconds=float(runtime_settings.get("tool_timeout_seconds", 15.0)),
             max_timeout_seconds=max(
                 float(runtime_settings.get("shell_exec_max_timeout_seconds", 60.0)),
@@ -280,6 +294,7 @@ def _resolve_cwd(
     workspace_root: Path,
     requested_cwd: object,
     allowed_roots: tuple[Path, ...],
+    policy_mode: str,
 ) -> tuple[Path, str]:
     raw_value = "."
     if requested_cwd is not None:
@@ -293,16 +308,19 @@ def _resolve_cwd(
     else:
         resolved = (workspace_root / raw_path).resolve()
 
-    workspace_root = workspace_root.resolve()
-    if resolved == workspace_root or resolved.is_relative_to(workspace_root):
-        policy = "workspace"
-    elif any(resolved == root or resolved.is_relative_to(root) for root in allowed_roots):
-        policy = "allowlist"
+    if policy_mode == "unrestricted":
+        policy = "unrestricted"
     else:
-        raise ShellExecPermissionError(
-            "Shell cwd must stay inside the workspace or a configured allowlist root.",
-            audit_payload={"cwd_resolved": str(resolved)},
-        )
+        workspace_root = workspace_root.resolve()
+        if resolved == workspace_root or resolved.is_relative_to(workspace_root):
+            policy = "workspace"
+        elif any(resolved == root or resolved.is_relative_to(root) for root in allowed_roots):
+            policy = "allowlist"
+        else:
+            raise ShellExecPermissionError(
+                "Shell cwd must stay inside the workspace or a configured allowlist root.",
+                audit_payload={"cwd_resolved": str(resolved)},
+            )
 
     if not resolved.exists():
         raise FileNotFoundError(f"Shell cwd does not exist: {resolved}")
@@ -324,9 +342,15 @@ def _resolve_timeout(value: object, *, default_seconds: float, max_seconds: floa
 
 def _build_allowed_env(
     *,
+    policy_mode: str,
     requested_env: dict[str, str],
     allowed_env_keys: frozenset[str],
 ) -> dict[str, str]:
+    if policy_mode == "unrestricted":
+        env = dict(os.environ)
+        env.update(requested_env)
+        return env
+
     env: dict[str, str] = {}
     for key in allowed_env_keys:
         value = os.environ.get(key)
@@ -358,6 +382,7 @@ def _format_shell_summary(payload: dict[str, Any]) -> str:
             f"in {payload['duration_ms']} ms."
         ),
         f"cwd: {payload['cwd_resolved']}",
+        f"policy: {payload.get('policy', 'restricted')}",
     ]
     stdout = str(payload.get("stdout") or "")
     stderr = str(payload.get("stderr") or "")

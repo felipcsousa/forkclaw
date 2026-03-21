@@ -1,14 +1,16 @@
 import time
-from app.services.memory import MemoryService
-from sqlmodel import Session, select
-from app.models.entities import MemoryRecallLog, MemoryEntry, Agent, SessionSummary, Message
-import pytest
-from app.db.seed import seed_default_data
 from uuid import uuid4
+
+from sqlmodel import Session, select
+
+from app.db.seed import seed_default_data
+from app.models.entities import Agent, MemoryEntry, MemoryRecallLog, Message
+from app.services.memory import MemoryService
+
 
 def test_recall_performance(test_client):
     from sqlalchemy import create_engine
-    from sqlmodel import Session
+
     from app.core.config import get_settings
 
     settings = get_settings()
@@ -53,7 +55,7 @@ def test_recall_performance(test_client):
             role="assistant",
             content_text="test",
             sequence_number=1,
-            status="committed"
+            status="committed",
         )
         db_session.add(msg)
 
@@ -83,4 +85,6 @@ def test_recall_performance(test_client):
         res = service.recall_for_message(message_id)
         end = time.perf_counter()
 
-        print(f"\nTime taken for recall_for_message with 1000 entries: {(end-start)*1000:.2f}ms")
+        print(
+            f"\nTime taken for recall_for_message with 1000 entries: {(end - start) * 1000:.2f}ms"
+        )

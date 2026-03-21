@@ -117,6 +117,10 @@ def seed_default_data(session: Session) -> Agent:
         ): ("integer", str(settings.shell_exec_max_output_chars)),
         (
             "runtime",
+            "shell_exec_policy_mode",
+        ): ("string", settings.shell_exec_policy_mode),
+        (
+            "runtime",
             "shell_exec_allowed_cwd_roots",
         ): ("json", None),
         (
@@ -133,6 +137,7 @@ def seed_default_data(session: Session) -> Agent:
         ("features", "memory_v1_enabled"): ("boolean", "false"),
         ("features", "memory_manual_crud_enabled"): ("boolean", "false"),
         ("features", "memory_hard_delete_enabled"): ("boolean", "false"),
+        ("features", "acp_bridge_enabled"): ("boolean", "false"),
         ("tools", "policy_profile"): ("string", "minimal"),
     }
 

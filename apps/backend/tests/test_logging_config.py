@@ -68,3 +68,106 @@ def test_configure_logging_rotates_file(monkeypatch, tmp_path) -> None:
 
     _reset_logging_state()
     clear_settings_cache()
+
+
+def test_configure_logging_exception_formatting(monkeypatch, tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_LOG_DIR", str(log_dir))
+    clear_settings_cache()
+    _reset_logging_state()
+
+    log_path = configure_logging()
+    logger = logging.getLogger("nanobot.test.exc")
+    try:
+        1 / 0
+    except ZeroDivisionError:
+        logger.exception("exception occurred")
+    _flush_handlers()
+
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    payload = json.loads(lines[-1])
+    assert "exception" in payload
+    assert "ZeroDivisionError" in payload["exception"]
+
+    _reset_logging_state()
+    clear_settings_cache()
+
+
+def test_configure_logging_json_default(monkeypatch, tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_LOG_DIR", str(log_dir))
+    clear_settings_cache()
+    _reset_logging_state()
+
+    log_path = configure_logging()
+    logger = logging.getLogger("nanobot.test.default")
+
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+
+    class CustomObject:
+        def __str__(self):
+            return "custom-object-str"
+
+    logger.info("testing default", extra={"now": now, "custom": CustomObject()})
+    _flush_handlers()
+
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    payload = json.loads(lines[-1])
+    assert payload["extra"]["now"] == now.isoformat()
+    assert payload["extra"]["custom"] == "custom-object-str"
+
+    _reset_logging_state()
+    clear_settings_cache()
+
+
+def test_configure_logging_double_configure_and_handlers(monkeypatch, tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("APP_LOG_DIR", str(log_dir))
+    clear_settings_cache()
+    _reset_logging_state()
+
+    from app.core.config import Settings
+
+    ensure_data_dir_called = 0
+    original_ensure = Settings.ensure_data_dir
+
+    def mock_ensure_data_dir(self):
+        nonlocal ensure_data_dir_called
+        ensure_data_dir_called += 1
+        return original_ensure(self)
+
+    monkeypatch.setattr(Settings, "ensure_data_dir", mock_ensure_data_dir)
+
+    log_path1 = configure_logging()
+
+    assert ensure_data_dir_called == 1
+
+    root_logger = logging.getLogger()
+    assert len(root_logger.handlers) == 2
+
+    from logging.handlers import RotatingFileHandler
+
+    handler_types = {type(h) for h in root_logger.handlers}
+    assert logging.StreamHandler in handler_types
+    assert RotatingFileHandler in handler_types
+
+    handlers_before = list(root_logger.handlers)
+
+    log_path2 = configure_logging()
+
+    assert ensure_data_dir_called == 2
+    assert log_path1 == log_path2
+
+    handlers_after = list(root_logger.handlers)
+    assert handlers_before == handlers_after
+
+    _reset_logging_state()
+    clear_settings_cache()

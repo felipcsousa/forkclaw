@@ -41,7 +41,7 @@ class ActivityRepository:
             .join(Task, Task.id == TaskRun.task_id)
             .join(SessionRecord, SessionRecord.id == Task.session_id, isouter=True)
             .join(CronJob, CronJob.id == Task.cron_job_id, isouter=True)
-            .where(Task.agent_id == agent_id)
+            .where(Task.agent_id == agent_id, Task.kind != "heartbeat")
         )
         if cursor is not None:
             created_at, task_run_id = cursor

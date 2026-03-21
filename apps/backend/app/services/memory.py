@@ -29,6 +29,7 @@ from app.schemas.memory import (
     MemoryRecallDetailRead,
     MemoryRecallItemRead,
     MemoryRecallLogEntryRead,
+    MemorySearchItemRead,
     SessionRecallSummaryRead,
 )
 from app.services.memory_admin_service import MemoryAdminService
@@ -70,34 +71,63 @@ class MemoryService:
         recall_status: str | None = None,
         mode: str = "all",
     ) -> list[MemoryItemRead]:
+        entry_stmt = select(MemoryEntry)
+        summary_stmt = select(SessionSummary)
+
+        if source_kind:
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind == source_kind)
+            summary_stmt = summary_stmt.where(SessionSummary.source_kind == source_kind)
+
+        if state == "active" or state is None:
+            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_(None))
+            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_(None))
+        elif state == "deleted":
+            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_not(None))
+            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_not(None))
+        elif state == "hidden":
+            entry_stmt = entry_stmt.where(
+                MemoryEntry.deleted_at.is_(None), MemoryEntry.hidden_from_recall.is_(True)
+            )
+            summary_stmt = summary_stmt.where(
+                SessionSummary.deleted_at.is_(None), SessionSummary.hidden_from_recall.is_(True)
+            )
+
+        if recall_status == "hidden":
+            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(True))
+            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(True))
+        elif recall_status == "active":
+            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
+            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
+
         items = [
-            *[self._read_entry(entry) for entry in self.session.exec(select(MemoryEntry))],
-            *[self._read_summary(summary) for summary in self.session.exec(select(SessionSummary))],
+            *[self._read_entry(entry) for entry in self.session.exec(entry_stmt)],
+            *[self._read_summary(summary) for summary in self.session.exec(summary_stmt)],
         ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
 
         for item in items:
-            haystack = " ".join(
-                [item.title, item.content, item.scope, item.source_kind, item.source_label]
-            ).lower()
             if kind and item.kind != kind:
                 continue
-            if query_text and query_text not in haystack:
-                continue
             if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
-                continue
-            if source_kind and item.source_kind != source_kind:
-                continue
-            if not self._matches_state_filter(item, state):
-                continue
-            if recall_status and item.recall_status != recall_status:
                 continue
             if mode == "manual" and not item.is_manual:
                 continue
             if mode == "automatic" and item.is_manual:
                 continue
+            if query_text:
+                haystack = " ".join(
+                    [
+                        item.title or "",
+                        item.content or "",
+                        item.scope or "",
+                        item.source_kind or "",
+                        item.source_label or "",
+                    ]
+                ).lower()
+                if query_text not in haystack:
+                    continue
             filtered.append(item)
 
         return sorted(filtered, key=lambda item: item.updated_at, reverse=True)
@@ -168,11 +198,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.hidden_from_recall = True
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def restore_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -186,11 +212,7 @@ class MemoryService:
         summary = self._require_summary(memory_id)
         summary.hidden_from_recall = False
         summary.deleted_at = None
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def promote_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -199,11 +221,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.importance = min(summary.importance + 0.3, 1.0)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def demote_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
@@ -212,11 +230,7 @@ class MemoryService:
 
         summary = self._require_summary(memory_id)
         summary.importance = max(summary.importance - 0.3, 0.0)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def delete_item(self, memory_id: str, *, hard: bool) -> MemoryItemRead | None:
         entry = self.repository.get_entry(memory_id)
@@ -233,11 +247,7 @@ class MemoryService:
             return None
         summary.deleted_at = utc_now()
         summary.hidden_from_recall = True
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary)
+        return self._save_summary(summary)
 
     def history_for_item(self, memory_id: str) -> list[MemoryHistoryEntryRead]:
         entry = self.repository.get_entry(memory_id)
@@ -268,67 +278,82 @@ class MemoryService:
             scopes=None,
             limit=max(limit * 4, limit),
         )
+        return self._filter_and_map_candidates(
+            items=response.items,
+            recent_record_ids=recent_record_ids,
+            limit=limit,
+        )
+
+    def _filter_and_map_candidates(
+        self,
+        items: list[MemorySearchItemRead],
+        recent_record_ids: set[str],
+        limit: int,
+    ) -> list[MemoryRecallCandidate]:
         candidates: list[MemoryRecallCandidate] = []
         current_ids: set[str] = set()
-        for item in response.items:
+        for item in items:
             score_breakdown = item.score_breakdown or {}
             lexical_score = float(score_breakdown.get("lexical") or 0.0)
             if lexical_score <= 0.0:
                 continue
             if item.id in recent_record_ids or item.id in current_ids:
                 continue
-            title = item.title or item.summary or item.body or "Memory"
-            scope = self._scope_label_from_key(item.origin.scope_key)
-            kind = (
-                "session_summary"
-                if item.record_type == "session_summary"
-                else self._kind_from_scope_type(
-                    item.origin.scope_type,
-                )
-            )
-            source_label = self._source_label(
-                item.source_kind,
-                is_override=item.override.status == "overrides_automatic",
-            )
-            importance = self._importance_label(item.importance)
-            origin_session_id = item.origin.session_id
-            origin_subagent_session_id = (
-                item.origin.session_id
-                if item.origin.session_id
-                and item.origin.root_session_id
-                and item.origin.session_id != item.origin.root_session_id
-                else None
-            )
-            reason = self._recall_reason(item)
-            candidates.append(
-                MemoryRecallCandidate(
-                    item=MemoryItemRead(
-                        id=item.id,
-                        kind=kind,
-                        title=title,
-                        content=item.body or item.summary or "",
-                        scope=scope,
-                        source_kind=item.source_kind,
-                        source_label=source_label,
-                        importance=importance,
-                        state="active",
-                        recall_status="active",
-                        is_manual=self._is_user_managed(item.source_kind),
-                        is_override=item.override.status == "overrides_automatic",
-                        origin_session_id=origin_session_id,
-                        origin_subagent_session_id=origin_subagent_session_id,
-                        original_memory_id=item.override.target_id,
-                        created_at=utc_now(),
-                        updated_at=utc_now(),
-                    ),
-                    reason=reason,
-                    score=item.score,
-                )
-            )
+
+            candidate = self._map_recall_candidate(item)
+            candidates.append(candidate)
             current_ids.add(item.id)
             if len(candidates) >= limit:
                 break
         return candidates
+
+    def _map_recall_candidate(self, item: MemorySearchItemRead) -> MemoryRecallCandidate:
+        title = item.title or item.summary or item.body or "Memory"
+        scope = self._scope_label_from_key(item.origin.scope_key)
+        kind = (
+            "session_summary"
+            if item.record_type == "session_summary"
+            else self._kind_from_scope_type(
+                item.origin.scope_type,
+            )
+        )
+        source_label = self._source_label(
+            item.source_kind,
+            is_override=item.override.status == "overrides_automatic",
+        )
+        importance = self._importance_label(item.importance)
+        origin_session_id = item.origin.session_id
+        origin_subagent_session_id = (
+            item.origin.session_id
+            if item.origin.session_id
+            and item.origin.root_session_id
+            and item.origin.session_id != item.origin.root_session_id
+            else None
+        )
+        reason = self._recall_reason(item)
+        return MemoryRecallCandidate(
+            item=MemoryItemRead(
+                id=item.id,
+                kind=kind,
+                title=title,
+                content=item.body or item.summary or "",
+                scope=scope,
+                source_kind=item.source_kind,
+                source_label=source_label,
+                importance=importance,
+                state="active",
+                recall_status="active",
+                is_manual=self._is_user_managed(item.source_kind),
+                is_override=item.override.status == "overrides_automatic",
+                origin_session_id=origin_session_id,
+                origin_subagent_session_id=origin_subagent_session_id,
+                original_memory_id=item.override.target_id,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            ),
+            reason=reason,
+            score=item.score,
+        )
 
     def inject_recall_context(
         self,
@@ -517,7 +542,9 @@ class MemoryService:
 
         missing_ids = [m_id for m_id in unique_ids if m_id not in items_map]
         for chunk in self._iter_lookup_chunks(missing_ids):
-            summaries = self.session.exec(select(SessionSummary).where(SessionSummary.id.in_(chunk)))
+            summaries = self.session.exec(
+                select(SessionSummary).where(SessionSummary.id.in_(chunk))
+            )
             for summary in summaries:
                 items_map[summary.id] = self._read_summary(summary)
 
@@ -549,10 +576,21 @@ class MemoryService:
             origin_task_run_id=None,
             override_target_summary_id=None,
         )
+        return self._save_summary(summary, title_override=payload.title, update_timestamp=False)
+
+    def _save_summary(
+        self,
+        summary: SessionSummary,
+        *,
+        title_override: str | None = None,
+        update_timestamp: bool = True,
+    ) -> MemoryItemRead:
+        if update_timestamp:
+            summary.updated_at = utc_now()
         self.session.add(summary)
         self.session.commit()
         self.session.refresh(summary)
-        return self._read_summary(summary, title_override=payload.title)
+        return self._read_summary(summary, title_override=title_override)
 
     def _update_manual_summary(
         self,
@@ -565,17 +603,35 @@ class MemoryService:
             summary.importance = self._importance_score(payload.importance)
         if payload.scope is not None:
             summary.scope_key = self._scope_key_from_label(payload.scope)
-        summary.updated_at = utc_now()
-        self.session.add(summary)
-        self.session.commit()
-        self.session.refresh(summary)
-        return self._read_summary(summary, title_override=payload.title)
+        return self._save_summary(summary, title_override=payload.title)
 
     def _create_entry_override(
         self,
         entry: MemoryEntry,
         payload: MemoryItemUpdate,
     ) -> MemoryItemRead:
+        override = self._build_override_entry(entry, payload)
+
+        entry.hidden_from_recall = True
+        entry.updated_by = "user"
+        entry.updated_at = utc_now()
+
+        self.session.add(entry)
+        created = self.repository.add_entry(override)
+
+        self._record_override_change_logs(entry.id, created.id)
+
+        self.session.commit()
+        self.session.refresh(created)
+        self.session.refresh(entry)
+
+        return self._read_entry(created)
+
+    def _build_override_entry(
+        self,
+        entry: MemoryEntry,
+        payload: MemoryItemUpdate,
+    ) -> MemoryEntry:
         title = (payload.title or entry.title).strip()
         content = (payload.content or entry.body).strip()
         inspected = inspect_manual_text(
@@ -583,7 +639,7 @@ class MemoryService:
             body=content,
             summary=summarize_text(content),
         )
-        override = MemoryEntry(
+        return MemoryEntry(
             agent_id=entry.agent_id,
             scope_type=entry.scope_type,
             scope_key=entry.scope_key,
@@ -616,31 +672,28 @@ class MemoryService:
             origin_task_run_id=entry.origin_task_run_id,
             override_target_entry_id=entry.id,
         )
-        entry.hidden_from_recall = True
-        entry.updated_by = "user"
-        entry.updated_at = utc_now()
-        self.session.add(entry)
-        created = self.repository.add_entry(override)
+
+    def _record_override_change_logs(
+        self,
+        original_entry_id: str,
+        override_entry_id: str,
+    ) -> None:
         self.repository.add_change_log(
-            memory_id=entry.id,
+            memory_id=original_entry_id,
             action="override_created",
             actor_type="user",
             actor_id="memory-studio",
-            before_snapshot={"id": entry.id},
-            after_snapshot={"override_id": created.id},
+            before_snapshot={"id": original_entry_id},
+            after_snapshot={"override_id": override_entry_id},
         )
         self.repository.add_change_log(
-            memory_id=created.id,
+            memory_id=override_entry_id,
             action="create",
             actor_type="user",
             actor_id="memory-studio",
             before_snapshot=None,
-            after_snapshot={"override_target_entry_id": entry.id},
+            after_snapshot={"override_target_entry_id": original_entry_id},
         )
-        self.session.commit()
-        self.session.refresh(created)
-        self.session.refresh(entry)
-        return self._read_entry(created)
 
     def _create_summary_override(
         self,

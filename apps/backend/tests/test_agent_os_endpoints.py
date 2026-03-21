@@ -1114,12 +1114,13 @@ def test_tool_permissions_are_listed_and_updatable(test_client: TestClient) -> N
 
 
 def test_tool_permissions_hide_legacy_tools_outside_catalog(test_client: TestClient) -> None:
+    unknown_tool_name = "legacy_cancel_subagent"
     with get_db_session() as session:
         agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
         session.add(
             ToolPermission(
                 agent_id=agent.id,
-                tool_name="cancel_subagent",
+                tool_name=unknown_tool_name,
                 workspace_path=None,
                 permission_level="allow",
                 approval_required=False,
@@ -1131,16 +1132,17 @@ def test_tool_permissions_hide_legacy_tools_outside_catalog(test_client: TestCli
     response = test_client.get("/tools/permissions")
     assert response.status_code == 200
     tool_names = {item["tool_name"] for item in response.json()["items"]}
-    assert "cancel_subagent" not in tool_names
+    assert unknown_tool_name not in tool_names
 
 
 def test_tool_policy_hides_legacy_overrides_outside_catalog(test_client: TestClient) -> None:
+    unknown_tool_name = "legacy_cancel_subagent"
     with get_db_session() as session:
         agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
         session.add(
             ToolPolicyOverride(
                 agent_id=agent.id,
-                tool_name="cancel_subagent",
+                tool_name=unknown_tool_name,
                 permission_level="allow",
                 status="active",
             )
@@ -1150,18 +1152,19 @@ def test_tool_policy_hides_legacy_overrides_outside_catalog(test_client: TestCli
     response = test_client.get("/tools/policy")
     assert response.status_code == 200
     override_tool_names = {item["tool_name"] for item in response.json()["overrides"]}
-    assert "cancel_subagent" not in override_tool_names
+    assert unknown_tool_name not in override_tool_names
 
 
 def test_agent_execution_ignores_legacy_permissions_outside_catalog(
     test_client: TestClient,
 ) -> None:
+    unknown_tool_name = "legacy_cancel_subagent"
     with get_db_session() as session:
         agent = session.exec(select(Agent).where(Agent.is_default.is_(True))).one()
         session.add(
             ToolPermission(
                 agent_id=agent.id,
-                tool_name="cancel_subagent",
+                tool_name=unknown_tool_name,
                 workspace_path=None,
                 permission_level="allow",
                 approval_required=False,
@@ -1190,7 +1193,7 @@ def test_agent_execution_ignores_legacy_permissions_outside_catalog(
         ).first()
 
     assert audit_event is not None
-    assert "cancel_subagent" in (audit_event.payload_json or "")
+    assert unknown_tool_name in (audit_event.payload_json or "")
 
 
 def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestClient) -> None:
@@ -1205,8 +1208,16 @@ def test_tool_catalog_and_policy_are_exposed_from_the_backend(test_client: TestC
     # Verify all expected fields from ToolCatalogEntryRead are present
     first_item = items[0]
     expected_keys = {
-        "id", "label", "description", "group", "group_label",
-        "risk", "status", "input_schema", "output_schema", "requires_workspace"
+        "id",
+        "label",
+        "description",
+        "group",
+        "group_label",
+        "risk",
+        "status",
+        "input_schema",
+        "output_schema",
+        "requires_workspace",
     }
     assert expected_keys.issubset(first_item.keys())
 
@@ -1940,6 +1951,7 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
         "parent_session_id": parent_id,
         "child_session_id": child_id,
         "status": "accepted",
+        "runtime": "subagent",
         "spawn_depth": 1,
         "toolsets": ["file", "web"],
         "model": "product-echo/simple",
@@ -2058,6 +2070,75 @@ def test_subagent_spawn_persists_child_session_and_lifecycle(
     assert detail_payload["timeline_events"][0]["status"] == "queued"
     assert "task_run_id" not in detail_payload["timeline_events"][0]
     assert "estimated_cost_usd" not in detail_payload["timeline_events"][0]
+
+
+def test_acp_bridge_status_can_be_toggled(test_client: TestClient) -> None:
+    initial = test_client.get("/acp/status")
+    assert initial.status_code == 200
+    assert initial.json()["enabled"] is False
+
+    enabled = test_client.put("/acp/status", json={"enabled": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+
+    current = test_client.get("/acp/status")
+    assert current.status_code == 200
+    assert current.json()["enabled"] is True
+
+    disabled = test_client.put("/acp/status", json={"enabled": False})
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+
+
+def test_acp_session_endpoints_require_enabled_bridge(test_client: TestClient) -> None:
+    create_response = test_client.post("/acp/sessions", json={"label": "ACP Off"})
+
+    assert create_response.status_code == 400
+    assert "disabled" in create_response.json()["detail"].lower()
+
+
+def test_acp_session_endpoints_work_when_bridge_is_enabled(test_client: TestClient) -> None:
+    enable_response = test_client.put("/acp/status", json={"enabled": True})
+    assert enable_response.status_code == 200
+    assert enable_response.json()["enabled"] is True
+
+    create_response = test_client.post("/acp/sessions", json={"label": "ACP Smoke"})
+    assert create_response.status_code == 200
+    session_key = create_response.json()["session_key"]
+
+    prompt_response = test_client.post(
+        "/acp/prompt",
+        json={"session_key": session_key, "text": "Ping ACP."},
+    )
+    assert prompt_response.status_code == 200
+    prompt_payload = prompt_response.json()
+    assert prompt_payload["session_key"] == session_key
+    assert prompt_payload["output_text"]
+
+    load_response = test_client.post(
+        "/acp/load_session",
+        json={"session_key": session_key, "limit": 20},
+    )
+    assert load_response.status_code == 200
+    assert len(load_response.json()["messages"]) >= 2
+
+    cancel_response = test_client.post("/acp/cancel", json={"session_key": session_key})
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+
+def test_subagent_runtime_acp_requires_enabled_bridge(test_client: TestClient) -> None:
+    parent_response = test_client.post("/sessions", json={"title": "Parent Session"})
+    assert parent_response.status_code == 201
+    parent_id = parent_response.json()["id"]
+
+    spawn_response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={"goal": "ACP runtime check", "runtime": "acp"},
+    )
+
+    assert spawn_response.status_code == 400
+    assert "disabled" in spawn_response.json()["detail"].lower()
 
 
 def test_sessions_listing_stays_main_only_and_can_include_subagent_counts(
@@ -2352,3 +2433,44 @@ def test_activity_timeline_includes_sanitized_subagent_lineage(test_client: Test
         for entry in item["entries"]
         if entry["type"] == "audit"
     )
+
+def test_reset_session_not_found(test_client: TestClient) -> None:
+    response = test_client.post("/sessions/non_existent_session/reset")
+    assert response.status_code in (400, 404)
+
+
+def test_reset_session_not_main(test_client: TestClient) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Parent"})
+    parent_id = create_session_response.json()["id"]
+
+    response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Long running child",
+            "context": "Keep running",
+            "toolsets": ["file"],
+            "model": "product-echo/simple",
+            "max_iterations": 2,
+        },
+    )
+    child_id = response.json()["child_session_id"]
+
+    reset_response = test_client.post(f"/sessions/{child_id}/reset")
+    assert reset_response.status_code == 400
+
+
+def test_reset_session_mock_error(test_client: TestClient, monkeypatch) -> None:
+    def mock_reset_session_conversation(*args, **kwargs):
+        raise ValueError("Simulated ValueError")
+
+    monkeypatch.setattr(
+        "app.services.agent_os.AgentOSService.reset_session_conversation",
+        mock_reset_session_conversation,
+    )
+
+    create_session_response = test_client.post("/sessions", json={"title": "Resettable"})
+    session_id = create_session_response.json()["id"]
+
+    reset_response = test_client.post(f"/sessions/{session_id}/reset")
+    assert reset_response.status_code == 400
+    assert "Simulated ValueError" in reset_response.json()["detail"]
