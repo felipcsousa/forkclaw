@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.memory.contracts import ConversationIdentity
 from app.memory.policy import (
     build_conversation_identity,
     dedupe_hash_for,
@@ -62,25 +63,11 @@ class MemoryCaptureService:
                 summary_text="Automatic memory capture suppressed by a user tombstone.",
                 level="warning",
             )
-            summary = SessionSummary(
-                agent_id=session_record.agent_id,
-                scope_key=identity.session_key,
-                session_id=session_record.id,
-                root_session_id=session_record.root_session_id or session_record.id,
-                conversation_id=identity.conversation_id,
-                parent_session_id=session_record.parent_session_id,
-                task_run_id=task_run.id if task_run is not None else None,
-                source_kind="summary",
+            summary = self._build_session_summary(
+                session_record=session_record,
+                identity=identity,
+                task_run=task_run,
                 summary_text=summary_text,
-                importance=0.0,
-                created_by="system",
-                workspace_path=None,
-                user_scope_key="local-user",
-                hidden_from_recall=False,
-                deleted_at=None,
-                origin_message_id=None,
-                origin_task_run_id=task_run.id if task_run is not None else None,
-                override_target_summary_id=None,
             )
             self.repository.add_session_summary(summary)
             return None
@@ -89,25 +76,11 @@ class MemoryCaptureService:
         if existing is not None:
             return existing
 
-        summary = SessionSummary(
-            agent_id=session_record.agent_id,
-            scope_key=identity.session_key,
-            session_id=session_record.id,
-            root_session_id=session_record.root_session_id or session_record.id,
-            conversation_id=identity.conversation_id,
-            parent_session_id=session_record.parent_session_id,
-            task_run_id=task_run.id if task_run is not None else None,
-            source_kind="summary",
+        summary = self._build_session_summary(
+            session_record=session_record,
+            identity=identity,
+            task_run=task_run,
             summary_text=summary_text,
-            importance=0.0,
-            created_by="system",
-            workspace_path=None,
-            user_scope_key="local-user",
-            hidden_from_recall=False,
-            deleted_at=None,
-            origin_message_id=None,
-            origin_task_run_id=task_run.id if task_run is not None else None,
-            override_target_summary_id=None,
         )
         self.repository.add_session_summary(summary)
 
@@ -150,6 +123,35 @@ class MemoryCaptureService:
             after_snapshot=self._snapshot(created, identity.to_dict()),
         )
         return created
+
+    def _build_session_summary(
+        self,
+        *,
+        session_record: SessionRecord,
+        identity: ConversationIdentity,
+        task_run: TaskRun | None,
+        summary_text: str,
+    ) -> SessionSummary:
+        return SessionSummary(
+            agent_id=session_record.agent_id,
+            scope_key=identity.session_key,
+            session_id=session_record.id,
+            root_session_id=session_record.root_session_id or session_record.id,
+            conversation_id=identity.conversation_id,
+            parent_session_id=session_record.parent_session_id,
+            task_run_id=task_run.id if task_run is not None else None,
+            source_kind="summary",
+            summary_text=summary_text,
+            importance=0.0,
+            created_by="system",
+            workspace_path=None,
+            user_scope_key="local-user",
+            hidden_from_recall=False,
+            deleted_at=None,
+            origin_message_id=None,
+            origin_task_run_id=task_run.id if task_run is not None else None,
+            override_target_summary_id=None,
+        )
 
     def _snapshot(
         self,
