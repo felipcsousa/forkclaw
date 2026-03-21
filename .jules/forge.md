@@ -10,3 +10,8 @@
 **Gap:** `build_tool_catalog` and `catalog_entry_from_descriptor` in `app/tools/catalog.py` had no explicit tests to verify correct attribute mapping or ordering of tools.
 **Learning:** `build_tool_catalog` relies heavily on an external registry dependency. Mocking it using `unittest.mock.patch` allows us to verify alphabetical sorting and correctness independently of the tools registered in the default catalog.
 **Action:** When adding or checking testing coverage for functions iterating over registry items, isolate the iteration logic using patched mock dependencies.
+
+## 2026-03-19 - Test tool registry and web providers
+**Gap:** The local utility tool registry (`app/tools/registry.py`) and provider implementations (like `BraveWebSearchProvider`) had virtually no test coverage (40-60%), leaving caching behavior, error handling, and parameter parsing vulnerable to regressions.
+**Learning:** These components depend heavily on file system operations, external network requests, and system commands (like clipboard). This requires extensive use of `unittest.mock` to mock `pathlib.Path`, `subprocess.run`, and `httpx.Client` reliably without relying on the host environment.
+**Action:** When testing system-level or external-facing utility tools, always utilize `patch` (for `subprocess` and `httpx`) and `MagicMock` (for `ToolExecutionContext` and `Path`) to simulate success and failure boundaries deterministically without actual side effects.
