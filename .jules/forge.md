@@ -15,3 +15,8 @@
 **Gap**: Missing service-level edge-case error tests for core `AgentOSService` session operations (`reset_session_conversation`, `create_session` missing agents).
 **Learning**: Service tests that don't cover default bootstrapping states (e.g. what if there's no default agent) or domain constraints (only "main" sessions can be reset) leave gaps that can hide edge case failures. Relying solely on endpoint tests often skips these edge branches inside the service implementation.
 **Action**: Explicitly write localized service-level tests that handle negative scenarios (such as manually unseeding default database defaults) and strictly assert on entity constraints like `session.kind` exceptions.
+
+## 2026-03-19 - Test tool registry and web providers
+**Gap:** The local utility tool registry (`app/tools/registry.py`) and provider implementations (like `BraveWebSearchProvider`) had virtually no test coverage (40-60%), leaving caching behavior, error handling, and parameter parsing vulnerable to regressions.
+**Learning:** These components depend heavily on file system operations, external network requests, and system commands (like clipboard). This requires extensive use of `unittest.mock` to mock `pathlib.Path`, `subprocess.run`, and `httpx.Client` reliably without relying on the host environment.
+**Action:** When testing system-level or external-facing utility tools, always utilize `patch` (for `subprocess` and `httpx`) and `MagicMock` (for `ToolExecutionContext` and `Path`) to simulate success and failure boundaries deterministically without actual side effects.
