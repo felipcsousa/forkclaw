@@ -71,9 +71,37 @@ class MemoryService:
         recall_status: str | None = None,
         mode: str = "all",
     ) -> list[MemoryItemRead]:
+        entry_stmt = select(MemoryEntry)
+        summary_stmt = select(SessionSummary)
+
+        if source_kind:
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind == source_kind)
+            summary_stmt = summary_stmt.where(SessionSummary.source_kind == source_kind)
+
+        if state == "active" or state is None:
+            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_(None))
+            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_(None))
+        elif state == "deleted":
+            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_not(None))
+            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_not(None))
+        elif state == "hidden":
+            entry_stmt = entry_stmt.where(
+                MemoryEntry.deleted_at.is_(None), MemoryEntry.hidden_from_recall.is_(True)
+            )
+            summary_stmt = summary_stmt.where(
+                SessionSummary.deleted_at.is_(None), SessionSummary.hidden_from_recall.is_(True)
+            )
+
+        if recall_status == "hidden":
+            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(True))
+            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(True))
+        elif recall_status == "active":
+            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
+            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
+
         items = [
-            *[self._read_entry(entry) for entry in self.session.exec(select(MemoryEntry))],
-            *[self._read_summary(summary) for summary in self.session.exec(select(SessionSummary))],
+            *[self._read_entry(entry) for entry in self.session.exec(entry_stmt)],
+            *[self._read_summary(summary) for summary in self.session.exec(summary_stmt)],
         ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
@@ -83,12 +111,6 @@ class MemoryService:
             if kind and item.kind != kind:
                 continue
             if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
-                continue
-            if source_kind and item.source_kind != source_kind:
-                continue
-            if not self._matches_state_filter(item, state):
-                continue
-            if recall_status and item.recall_status != recall_status:
                 continue
             if mode == "manual" and not item.is_manual:
                 continue

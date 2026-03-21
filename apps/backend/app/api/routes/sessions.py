@@ -197,14 +197,9 @@ async def stream_session_events(
     request: Request,
     task_run_id: str | None = Query(default=None),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    _: None = Depends(ensure_main_session),
 ) -> StreamingResponse:
     with get_db_session() as session:
-        subagents = SubagentDelegationService(session)
-        try:
-            subagents.ensure_main_session_interaction_allowed(session_id)
-        except ValueError as exc:
-            raise value_error_as_http_exception(exc) from exc
-
         if AgentOSService(session).get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found.")
 

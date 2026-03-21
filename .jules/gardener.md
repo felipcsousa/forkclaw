@@ -6,3 +6,8 @@
 **Smell:** Duplicate ORM save/commit/refresh cycles when updating `SessionSummary` entities in `MemoryService`.
 **Learning:** This repo has many distinct methods for memory state changes (promote, demote, hide, etc.), which led to repetitive boilerplates updating timestamps and saving models. Extracting small helpers reduces noise.
 **Action:** When updating database models across many specialized service methods, extract the common timestamp-update and `session.commit()` cycle into a private helper method (e.g., `_save_summary`).
+
+## 2024-03-17 - Extract duplicated audit logging in memory admin service
+**Smell:** Eight identical, multi-line `self.repository.add_change_log(...)` calls duplicated across all CRUD actions, cluttering the domain logic with infrastructure boilerplate.
+**Learning:** In services where every mutating operation must be audited, repeating the full audit payload (actor_type, actor_id, etc.) makes the code verbose and increases the risk of drift.
+**Action:** Extract a private helper (e.g., `_log_change`) within the service to encapsulate the repetitive audit arguments, keeping the domain methods focused on their primary intent.
