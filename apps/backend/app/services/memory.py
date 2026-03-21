@@ -79,7 +79,7 @@ class MemoryService:
 
         # Generator for MemoryEntry
         def generate_entries():
-            if kind and kind not in ("memory_entry", "stable", "working"):
+            if kind and kind not in ("memory_entry", "stable", "episodic", "working"):
                 return
             query = select(MemoryEntry)
             if source_kind:
