@@ -1,5 +1,5 @@
-import pytest
 import keyring
+import pytest
 from keyring.errors import KeyringError, NoKeyringError
 
 from app.core.secrets import KeychainSecretStore, SecretStoreError
