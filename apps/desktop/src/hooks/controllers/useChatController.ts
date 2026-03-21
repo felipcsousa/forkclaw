@@ -69,6 +69,7 @@ export function useChatController({
     useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const isSendingRef = useRef(false);
   const [cancellingSubagentId, setCancellingSubagentId] = useState<
     string | null
   >(null);
@@ -662,7 +663,7 @@ export function useChatController({
 
   const handleSendMessage = useCallback(
     async (afterSend?: (sessionId: string) => Promise<void>) => {
-      if (isSending) {
+      if (isSendingRef.current) {
         return null;
       }
 
@@ -672,74 +673,81 @@ export function useChatController({
         return null;
       }
 
-      const session = await ensureSessionForSend();
-      if (!session) {
-        return null;
-      }
-
-      const localRunId = `optimistic:${session.id}:${Date.now()}`;
-      dispatchRuns({
-        type: 'run/optimistic-created',
-        sessionId: session.id,
-        localRunId,
-        prompt: trimmed,
-        createdAt: new Date().toISOString(),
-      });
-
-      setDraft('');
-      const response = (await runAsyncAction(
-        async (): Promise<Partial<AgentExecutionAcceptedResponse> | undefined> =>
-          (await sendSessionMessageAsync(
-            session.id,
-            trimmed,
-          )) as Partial<AgentExecutionAcceptedResponse> | undefined,
-        {
-          setPending: setIsSending,
-          errorMessage: 'Failed to send message.',
-        },
-      )) as Partial<AgentExecutionAcceptedResponse> | null;
-
-      if (response === null) {
-        dispatchRuns({
-          type: 'run/optimistic-discarded',
-          sessionId: session.id,
-          localRunId,
-        });
-        setDraft(trimmed);
-        return null;
-      }
-
-      dispatchRuns({
-        type: 'run/response-bound',
-        sessionId: session.id,
-        localRunId,
-        response,
-      });
+      isSendingRef.current = true;
+      setIsSending(true);
 
       try {
-        const refreshed = await refreshSessionContext(session.id);
-        if (refreshed === null) {
-          setErrorMessage('Message sent, but failed to refresh session context.');
+        const session = await ensureSessionForSend();
+        if (!session) {
+          return null;
         }
-      } catch (error) {
-        setErrorMessage(
-          toErrorMessage(error, 'Message sent, but failed to refresh session context.'),
-        );
-      }
 
-      if (afterSend) {
+        const localRunId = `optimistic:${session.id}:${Date.now()}`;
+        dispatchRuns({
+          type: 'run/optimistic-created',
+          sessionId: session.id,
+          localRunId,
+          prompt: trimmed,
+          createdAt: new Date().toISOString(),
+        });
+
+        setDraft('');
+        const response = (await runAsyncAction(
+          async (): Promise<Partial<AgentExecutionAcceptedResponse> | undefined> =>
+            (await sendSessionMessageAsync(
+              session.id,
+              trimmed,
+            )) as Partial<AgentExecutionAcceptedResponse> | undefined,
+          {
+            errorMessage: 'Failed to send message.',
+          },
+        )) as Partial<AgentExecutionAcceptedResponse> | null;
+
+        if (response === null) {
+          dispatchRuns({
+            type: 'run/optimistic-discarded',
+            sessionId: session.id,
+            localRunId,
+          });
+          setDraft(trimmed);
+          return null;
+        }
+
+        dispatchRuns({
+          type: 'run/response-bound',
+          sessionId: session.id,
+          localRunId,
+          response,
+        });
+
         try {
-          await afterSend(session.id);
+          const refreshed = await refreshSessionContext(session.id);
+          if (refreshed === null) {
+            setErrorMessage('Message sent, but failed to refresh session context.');
+          }
         } catch (error) {
           setErrorMessage(
-            toErrorMessage(error, 'Message sent, but failed to refresh related views.'),
+            toErrorMessage(error, 'Message sent, but failed to refresh session context.'),
           );
         }
-      }
 
-      return session;
+        if (afterSend) {
+          try {
+            await afterSend(session.id);
+          } catch (error) {
+            setErrorMessage(
+              toErrorMessage(error, 'Message sent, but failed to refresh related views.'),
+            );
+          }
+        }
+
+        return session;
+      } finally {
+        isSendingRef.current = false;
+        setIsSending(false);
+      }
     },
-    [draft, ensureSessionForSend, isSending, refreshSessionContext, runAsyncAction, setErrorMessage],
+    [draft, ensureSessionForSend, refreshSessionContext, runAsyncAction, setErrorMessage],
   );
 
   const activeSubagentIndex = activeSubagent
