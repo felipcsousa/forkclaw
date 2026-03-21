@@ -11,4 +11,3 @@
 **Smell:** Eight identical, multi-line `self.repository.add_change_log(...)` calls duplicated across all CRUD actions, cluttering the domain logic with infrastructure boilerplate.
 **Learning:** In services where every mutating operation must be audited, repeating the full audit payload (actor_type, actor_id, etc.) makes the code verbose and increases the risk of drift.
 **Action:** Extract a private helper (e.g., `_log_change`) within the service to encapsulate the repetitive audit arguments, keeping the domain methods focused on their primary intent.
-
