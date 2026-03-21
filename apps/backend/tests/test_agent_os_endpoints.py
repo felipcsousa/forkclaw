@@ -2433,3 +2433,44 @@ def test_activity_timeline_includes_sanitized_subagent_lineage(test_client: Test
         for entry in item["entries"]
         if entry["type"] == "audit"
     )
+
+def test_reset_session_not_found(test_client: TestClient) -> None:
+    response = test_client.post("/sessions/non_existent_session/reset")
+    assert response.status_code == 404
+
+
+def test_reset_session_not_main(test_client: TestClient) -> None:
+    create_session_response = test_client.post("/sessions", json={"title": "Parent"})
+    parent_id = create_session_response.json()["id"]
+
+    response = test_client.post(
+        f"/sessions/{parent_id}/subagents",
+        json={
+            "goal": "Long running child",
+            "context": "Keep running",
+            "toolsets": ["file"],
+            "model": "product-echo/simple",
+            "max_iterations": 2,
+        },
+    )
+    child_id = response.json()["child_session_id"]
+
+    reset_response = test_client.post(f"/sessions/{child_id}/reset")
+    assert reset_response.status_code == 400
+
+
+def test_reset_session_mock_error(test_client: TestClient, monkeypatch) -> None:
+    def mock_reset_session_conversation(*args, **kwargs):
+        raise ValueError("Simulated ValueError")
+
+    monkeypatch.setattr(
+        "app.services.agent_os.AgentOSService.reset_session_conversation",
+        mock_reset_session_conversation,
+    )
+
+    create_session_response = test_client.post("/sessions", json={"title": "Resettable"})
+    session_id = create_session_response.json()["id"]
+
+    reset_response = test_client.post(f"/sessions/{session_id}/reset")
+    assert reset_response.status_code == 400
+    assert "Simulated ValueError" in reset_response.json()["detail"]
