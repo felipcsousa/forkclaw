@@ -11,6 +11,11 @@
 **Learning:** `build_tool_catalog` relies heavily on an external registry dependency. Mocking it using `unittest.mock.patch` allows us to verify alphabetical sorting and correctness independently of the tools registered in the default catalog.
 **Action:** When adding or checking testing coverage for functions iterating over registry items, isolate the iteration logic using patched mock dependencies.
 
+## 2026-03-20 - [Session Reset Contract Validation]
+**Gap:** The `/sessions/{session_id}/reset` endpoint had no test coverage for error boundaries, meaning breaking changes to how `ValueError`s from `AgentOSService.reset_session_conversation` were mapped to HTTP 400s (or how `ensure_main_session` handled non-existent/subagent sessions) would go undetected.
+**Learning:** In the FastAPI routing layer, exceptions raised by deep service logic (like `AgentOSService`) are often caught and translated via `value_error_as_http_exception`. Testing these translation boundaries ensures API contracts remain stable even if underlying validation messages change.
+**Action:** When adding new FastAPI endpoints that perform domain validation, always include negative test cases that explicitly trigger those domain errors (e.g., via mocking or invalid state setup) to verify the correct HTTP status code is returned.
+
 ## 2026-03-17 - AgentOSService Edge Case and Domain Constraint Testing Gap
 **Gap**: Missing service-level edge-case error tests for core `AgentOSService` session operations (`reset_session_conversation`, `create_session` missing agents).
 **Learning**: Service tests that don't cover default bootstrapping states (e.g. what if there's no default agent) or domain constraints (only "main" sessions can be reset) leave gaps that can hide edge case failures. Relying solely on endpoint tests often skips these edge branches inside the service implementation.
