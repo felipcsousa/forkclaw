@@ -71,101 +71,29 @@ class MemoryService:
         recall_status: str | None = None,
         mode: str = "all",
     ) -> list[MemoryItemRead]:
+        items = [
+            *[self._read_entry(entry) for entry in self.session.exec(select(MemoryEntry))],
+            *[self._read_summary(summary) for summary in self.session.exec(select(SessionSummary))],
+        ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
 
-        entry_stmt = select(MemoryEntry)
-        if kind:
-            if kind == "episodic":
-                entry_stmt = entry_stmt.where(MemoryEntry.scope_type == "episodic")
-            elif kind == "stable":
-                entry_stmt = entry_stmt.where(MemoryEntry.scope_type == "stable")
-            else:
-                entry_stmt = entry_stmt.where(MemoryEntry.scope_type == kind)
-
-        if normalized_scope:
-            entry_stmt = entry_stmt.where(
-                MemoryEntry.scope_key == self._scope_key_from_label(normalized_scope)
-            )
-
-        if source_kind:
-            entry_stmt = entry_stmt.where(MemoryEntry.source_kind == source_kind)
-
-        if mode == "manual":
-            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.in_(USER_MANAGED_SOURCE_KINDS))
-        elif mode == "automatic":
-            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.notin_(USER_MANAGED_SOURCE_KINDS))
-
-        if state == "hidden":
-            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_(None)).where(
-                MemoryEntry.hidden_from_recall.is_(True)
-            )
-        elif state == "deleted":
-            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_not(None))
-        elif state == "active" or state is None:
-            entry_stmt = entry_stmt.where(MemoryEntry.deleted_at.is_(None))
-
-        if recall_status == "hidden":
-            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(True))
-        elif recall_status == "active":
-            entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
-
-        entries = self.session.exec(entry_stmt).all()
-        for entry in entries:
-            item = self._read_entry(entry)
-            if query_text:
-                haystack = " ".join(
-                    [
-                        item.title or "",
-                        item.content or "",
-                        item.scope or "",
-                        item.source_kind or "",
-                        item.source_label or "",
-                    ]
-                ).lower()
-                if query_text not in haystack:
-                    continue
-            filtered.append(item)
-
-        summary_stmt = select(SessionSummary)
-        if kind and kind != "session_summary":
-            summary_stmt = summary_stmt.where(False)
-
-        if normalized_scope:
-            summary_stmt = summary_stmt.where(
-                SessionSummary.scope_key == self._scope_key_from_label(normalized_scope)
-            )
-
-        if source_kind:
-            summary_stmt = summary_stmt.where(SessionSummary.source_kind == source_kind)
-
-        if mode == "manual":
-            summary_stmt = summary_stmt.where(
-                SessionSummary.source_kind.in_(USER_MANAGED_SOURCE_KINDS)
-            )
-        elif mode == "automatic":
-            summary_stmt = summary_stmt.where(
-                SessionSummary.source_kind.notin_(USER_MANAGED_SOURCE_KINDS)
-            )
-
-        if state == "hidden":
-            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_(None)).where(
-                SessionSummary.hidden_from_recall.is_(True)
-            )
-        elif state == "deleted":
-            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_not(None))
-        elif state == "active" or state is None:
-            summary_stmt = summary_stmt.where(SessionSummary.deleted_at.is_(None))
-
-        if recall_status == "hidden":
-            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(True))
-        elif recall_status == "active":
-            summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
-
-        summaries = self.session.exec(summary_stmt).all()
-        for summary in summaries:
-            item = self._read_summary(summary)
+        for item in items:
+            if kind and item.kind != kind:
+                continue
+            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
+                continue
+            if source_kind and item.source_kind != source_kind:
+                continue
+            if not self._matches_state_filter(item, state):
+                continue
+            if recall_status and item.recall_status != recall_status:
+                continue
+            if mode == "manual" and not item.is_manual:
+                continue
+            if mode == "automatic" and item.is_manual:
+                continue
             if query_text:
                 haystack = " ".join(
                     [
