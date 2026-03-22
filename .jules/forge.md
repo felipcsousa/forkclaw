@@ -17,3 +17,7 @@
 
 
 
+## 2026-03-22 - Testing Subagent Delegation State Getters and Updaters
+**Gap:** The helper methods `aggregate_counts_for_sessions`, `ensure_main_session_interaction_allowed`, `get_main_session`, and `_mark_run_as_acp_mapped` in `app/services/subagents.py` lacked test coverage, which could lead to regressions in state management or session isolation.
+**Learning:** Small, pure getters and single-action state updaters are often skipped in initial PRs because they are 'too simple to fail', but they represent critical boundaries (like ensuring only main sessions can be interacted with).
+**Action:** When adding state-transitioning methods or validation guards for sessions, always add a basic unit test to lock the expected behavior against accidental regression.

@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from nanobot.providers.base import LLMResponse
@@ -823,3 +824,109 @@ def test_running_subagent_honors_cooperative_cancel_before_persisting_output(
         assert child_messages == []
         assert parent_messages
         assert "interrupted" in parent_messages[-1].content_text.lower()
+
+
+def test_aggregate_counts_for_sessions_handles_empty(test_client: TestClient) -> None:
+    del test_client
+    with get_db_session() as session:
+        service = SubagentDelegationService(session)
+        counts = service.aggregate_counts_for_sessions([])
+        assert counts == {}
+
+
+def test_ensure_main_session_interaction_allowed(test_client: TestClient) -> None:
+    del test_client
+    with get_db_session() as session:
+        seed_default_data(session)
+        service = SubagentDelegationService(session)
+        parent = AgentOSService(session).create_session("Main Parent")
+
+        # Valid main session
+        service.ensure_main_session_interaction_allowed(parent.id)
+
+        # Missing session
+        with pytest.raises(ValueError, match="Session not found."):
+            service.ensure_main_session_interaction_allowed("missing_id")
+
+        # Subagent session
+        spawn_response = service.spawn(
+            parent_session_id=parent.id,
+            payload=SubagentSpawnRequest(
+                goal="Child",
+                toolsets=[],
+                model="product-echo/simple",
+            ),
+        )
+        with pytest.raises(
+            ValueError, match="Subagent sessions cannot receive direct user interaction."
+        ):
+            service.ensure_main_session_interaction_allowed(spawn_response.child_session_id)
+
+
+def test_get_main_session(test_client: TestClient) -> None:
+    del test_client
+    with get_db_session() as session:
+        seed_default_data(session)
+        service = SubagentDelegationService(session)
+        parent = AgentOSService(session).create_session("Main Parent")
+
+        # Returns for main
+        assert service.get_main_session(parent.id).id == parent.id
+
+        # Returns None for missing
+        assert service.get_main_session("missing_id") is None
+
+        # Returns None for subagent
+        spawn_response = service.spawn(
+            parent_session_id=parent.id,
+            payload=SubagentSpawnRequest(
+                goal="Child",
+                toolsets=[],
+                model="product-echo/simple",
+            ),
+        )
+        assert service.get_main_session(spawn_response.child_session_id) is None
+
+
+def test_mark_run_as_acp_mapped(test_client: TestClient) -> None:
+    del test_client
+    with get_db_session() as session:
+        seed_default_data(session)
+        service = SubagentDelegationService(session)
+        parent = AgentOSService(session).create_session("ACP Parent")
+
+        spawn_response = service.spawn(
+            parent_session_id=parent.id,
+            payload=SubagentSpawnRequest(
+                goal="Child",
+                toolsets=[],
+                model="product-echo/simple",
+            ),
+        )
+
+        queued_run_id = service.repository.get_subagent(
+            parent_session_id=parent.id, child_session_id=spawn_response.child_session_id
+        )[1].id
+
+        service._mark_run_as_acp_mapped(
+            run_id=queued_run_id, child_session_id=spawn_response.child_session_id
+        )
+
+        updated_run = service.repository.get_run(queued_run_id)
+        updated_child = service.repository.get_session(spawn_response.child_session_id)
+
+        assert updated_run.lifecycle_status == "completed"
+        assert updated_run.final_summary == "ACP session mapped and ready for prompt."
+        assert '"runtime": "acp"' in updated_run.final_output_json
+
+        assert updated_child.status == "active"
+        assert updated_child.summary == "Mapped to ACP bridge."
+
+        # Verify it raises if run/child not found
+        with pytest.raises(ValueError, match="Subagent run not found for ACP mapping."):
+            service._mark_run_as_acp_mapped(
+                run_id="missing", child_session_id=spawn_response.child_session_id
+            )
+
+        with pytest.raises(ValueError, match="Subagent run not found for ACP mapping."):
+            service._mark_run_as_acp_mapped(run_id=queued_run_id, child_session_id="missing")
