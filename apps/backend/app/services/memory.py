@@ -99,24 +99,25 @@ class MemoryService:
             entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
             summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
 
-        items = [
-            *[self._read_entry(entry) for entry in self.session.exec(entry_stmt)],
-            *[self._read_summary(summary) for summary in self.session.exec(summary_stmt)],
-        ]
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
 
-        for item in items:
-            if kind and item.kind != kind:
+        for entry in self.session.exec(entry_stmt):
+            if kind and self._kind_from_scope_type(entry.scope_type) != kind:
                 continue
-            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
+            if normalized_scope:
+                entry_scope = self._scope_label_from_key(entry.scope_key)
+                if self._normalize_label(entry_scope) != normalized_scope:
+                    continue
+            is_manual = self._is_user_managed(entry.source_kind)
+            if mode == "manual" and not is_manual:
                 continue
-            if mode == "manual" and not item.is_manual:
+            if mode == "automatic" and is_manual:
                 continue
-            if mode == "automatic" and item.is_manual:
-                continue
+
             if query_text:
+                item = self._read_entry(entry)
                 haystack = " ".join(
                     [
                         item.title or "",
@@ -128,7 +129,39 @@ class MemoryService:
                 ).lower()
                 if query_text not in haystack:
                     continue
-            filtered.append(item)
+                filtered.append(item)
+            else:
+                filtered.append(self._read_entry(entry))
+
+        for summary in self.session.exec(summary_stmt):
+            if kind and "session_summary" != kind:
+                continue
+            if normalized_scope:
+                summary_scope = self._scope_label_from_key(summary.scope_key)
+                if self._normalize_label(summary_scope) != normalized_scope:
+                    continue
+            is_manual = summary.source_kind == "manual"
+            if mode == "manual" and not is_manual:
+                continue
+            if mode == "automatic" and is_manual:
+                continue
+
+            if query_text:
+                item = self._read_summary(summary)
+                haystack = " ".join(
+                    [
+                        item.title or "",
+                        item.content or "",
+                        item.scope or "",
+                        item.source_kind or "",
+                        item.source_label or "",
+                    ]
+                ).lower()
+                if query_text not in haystack:
+                    continue
+                filtered.append(item)
+            else:
+                filtered.append(self._read_summary(summary))
 
         return sorted(filtered, key=lambda item: item.updated_at, reverse=True)
 
