@@ -17,3 +17,7 @@
 **Smell:** Large Pydantic/SQLModel instantiations (`SessionSummary`) with ~18 arguments were duplicated verbatim across conditional guard clauses in `MemoryCaptureService.capture_execution_result`.
 **Learning:** This repo tends to copy-paste large model instantiations across branches which increases visual noise and the risk of drift if the model schema changes.
 **Action:** Extract large, repeated model instantiations into private helper functions (like `_build_session_summary`) to reduce duplication and keep complex route/service methods clean.
+## 2025-02-18 - Extract duplicated batch item fetching logic in memory service
+**Smell:** Duplicated loops gathering record IDs from grouped recall rows to perform batch fetching in `recall_for_session` and `recall_log`.
+**Learning:** In backend data processing, gathering lists of IDs from grouped datasets before batch lookups is a common pattern that tends to drift if duplicated.
+**Action:** Extract a dedicated helper method `_batch_get_items_for_groups` to consolidate the loop and ID gathering before passing to `_batch_get_items`.
