@@ -99,36 +99,71 @@ class MemoryService:
             entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
             summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
 
-        items = [
-            *[self._read_entry(entry) for entry in self.session.exec(entry_stmt)],
-            *[self._read_summary(summary) for summary in self.session.exec(summary_stmt)],
-        ]
-        query_text = (query or "").strip().lower()
-        normalized_scope = self._normalize_label(scope)
+        if kind and kind != "session_summary":
+            scope_type = "episodic" if kind == "episodic" else "stable"
+            entry_stmt = entry_stmt.where(MemoryEntry.scope_type == scope_type)
+
+        if mode == "manual":
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.in_(USER_MANAGED_SOURCE_KINDS))
+            summary_stmt = summary_stmt.where(SessionSummary.source_kind == "manual")
+        elif mode == "automatic":
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.not_in(USER_MANAGED_SOURCE_KINDS))
+            summary_stmt = summary_stmt.where(SessionSummary.source_kind != "manual")
+
+        if scope:
+            scope_key = self._scope_key_from_label(scope)
+            entry_stmt = entry_stmt.where(MemoryEntry.scope_key == scope_key)
+            summary_stmt = summary_stmt.where(SessionSummary.scope_key == scope_key)
+
         filtered: list[MemoryItemRead] = []
 
-        for item in items:
-            if kind and item.kind != kind:
-                continue
-            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
-                continue
-            if mode == "manual" and not item.is_manual:
-                continue
-            if mode == "automatic" and item.is_manual:
-                continue
-            if query_text:
-                haystack = " ".join(
-                    [
-                        item.title or "",
-                        item.content or "",
-                        item.scope or "",
-                        item.source_kind or "",
-                        item.source_label or "",
-                    ]
-                ).lower()
-                if query_text not in haystack:
-                    continue
-            filtered.append(item)
+        query_text = query.strip().lower() if query else ""
+
+        if not kind or kind != "session_summary":
+            for entry in self.session.exec(entry_stmt):
+                if query_text:
+                    # Pre-filter using native object attributes to avoid expensive Pydantic model
+                    # conversion for items that are clearly not matches.
+                    # We can use _source_label and _scope_label_from_key cheaply
+                    scope_label = self._scope_label_from_key(entry.scope_key)
+                    source_label = self._source_label(
+                        entry.source_kind, is_override=bool(entry.override_target_entry_id)
+                    )
+                    raw_haystack = " ".join(
+                        [
+                            entry.title or "",
+                            entry.body or "",
+                            scope_label or "",
+                            entry.source_kind or "",
+                            source_label or "",
+                        ]
+                    ).lower()
+                    if query_text not in raw_haystack:
+                        continue
+
+                filtered.append(self._read_entry(entry))
+
+        if not kind or kind == "session_summary":
+            for summary in self.session.exec(summary_stmt):
+                if query_text:
+                    scope_label = self._scope_label_from_key(summary.scope_key)
+                    source_label = self._source_label(
+                        summary.source_kind, is_override=bool(summary.override_target_summary_id)
+                    )
+                    title = summarize_text(summary.summary_text, limit=80).strip()
+                    raw_haystack = " ".join(
+                        [
+                            title or "",
+                            summary.summary_text or "",
+                            scope_label or "",
+                            summary.source_kind or "",
+                            source_label or "",
+                        ]
+                    ).lower()
+                    if query_text not in raw_haystack:
+                        continue
+
+                filtered.append(self._read_summary(summary))
 
         return sorted(filtered, key=lambda item: item.updated_at, reverse=True)
 
