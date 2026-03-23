@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from sqlalchemy.sql import false
 from sqlmodel import Session, select
 
 from app.memory.policy import dedupe_hash_for, inspect_manual_text, summarize_text
@@ -99,22 +100,39 @@ class MemoryService:
             entry_stmt = entry_stmt.where(MemoryEntry.hidden_from_recall.is_(False))
             summary_stmt = summary_stmt.where(SessionSummary.hidden_from_recall.is_(False))
 
+        # Optimization: Push basic filters down into the database where clauses
+        # to prevent fetching and instantiating massive numbers of Pydantic models.
+        if kind == "episodic":
+            entry_stmt = entry_stmt.where(MemoryEntry.scope_type == "episodic")
+            summary_stmt = summary_stmt.where(false())
+        elif kind == "stable":
+            entry_stmt = entry_stmt.where(MemoryEntry.scope_type != "episodic")
+            summary_stmt = summary_stmt.where(false())
+        elif kind == "session_summary":
+            entry_stmt = entry_stmt.where(false())
+
+        if mode == "manual":
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.in_(USER_MANAGED_SOURCE_KINDS))
+            summary_stmt = summary_stmt.where(
+                SessionSummary.source_kind.in_(USER_MANAGED_SOURCE_KINDS)
+            )
+        elif mode == "automatic":
+            entry_stmt = entry_stmt.where(MemoryEntry.source_kind.notin_(USER_MANAGED_SOURCE_KINDS))
+            summary_stmt = summary_stmt.where(
+                SessionSummary.source_kind.notin_(USER_MANAGED_SOURCE_KINDS)
+            )
+
         items = [
             *[self._read_entry(entry) for entry in self.session.exec(entry_stmt)],
             *[self._read_summary(summary) for summary in self.session.exec(summary_stmt)],
         ]
+
         query_text = (query or "").strip().lower()
         normalized_scope = self._normalize_label(scope)
         filtered: list[MemoryItemRead] = []
 
         for item in items:
-            if kind and item.kind != kind:
-                continue
             if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
-                continue
-            if mode == "manual" and not item.is_manual:
-                continue
-            if mode == "automatic" and item.is_manual:
                 continue
             if query_text:
                 haystack = " ".join(
