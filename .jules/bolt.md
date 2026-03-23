@@ -5,3 +5,6 @@
 ## 2024-05-15 - [Hoist \`utc_now\` calls out of loops]
 **Learning:** Calling \`MemorySearchService._now()\` inside the list ranking loop \`_rank_working_items\` introduces huge overhead for large candidate arrays.
 **Action:** Always hoist current time evaluations (like \`utc_now()\` or \`self._now()\`) outside loops to avoid significant execution overhead.
+## 2026-03-23 - [Avoid Pydantic Conversion using DB Raw Query]
+**Learning:** During text search in `list_items`, filtering on the DB properties directly (instead of first materializing into a full Pydantic model) is crucial for performance. Always avoid doing `self._read_entry` on rows that won't make it to the returned set.
+**Action:** Defer Pydantic model conversions when possible by doing text search on the ORM objects strings first, then generating the Pydantic object if it passes.
