@@ -403,6 +403,7 @@ def demote_memory_item(
     "/memory/items/{memory_id}",
     status_code=status.HTTP_200_OK,
     response_model=MemoryItemRead,
+    response_model_exclude_none=True,
 )
 def delete_memory_item(
     memory_id: str,
