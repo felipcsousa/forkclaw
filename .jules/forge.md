@@ -17,3 +17,7 @@
 
 
 
+## 2024-03-16 - Missing early return in form onSubmit handlers
+**Gap:** Form submission handlers (`onSubmit`) in React components (`AgentSettingsPanel`, `OperationalSettingsPanel`, `CronJobsPanel`) could be triggered via keyboard events (like 'Enter') even when the submit button was disabled, leading to double-submissions or overlapping API calls.
+**Learning:** React form elements can still trigger `onSubmit` natively via keyboard inputs even if the `<button type="submit">` is disabled. Always include an explicit early return guard clause (e.g., `if (disabled) return;`) directly inside the `onSubmit` handler to prevent these concurrent actions.
+**Action:** When creating or testing React forms, always include tests that trigger `fireEvent.submit` on the form while the component is in a loading or disabled state, and assert that the submission callback is not invoked.
