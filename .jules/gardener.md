@@ -17,3 +17,7 @@
 **Smell:** Large Pydantic/SQLModel instantiations (`SessionSummary`) with ~18 arguments were duplicated verbatim across conditional guard clauses in `MemoryCaptureService.capture_execution_result`.
 **Learning:** This repo tends to copy-paste large model instantiations across branches which increases visual noise and the risk of drift if the model schema changes.
 **Action:** Extract large, repeated model instantiations into private helper functions (like `_build_session_summary`) to reduce duplication and keep complex route/service methods clean.
+## 2025-05-15 - Extract Duplicate Complex Instantiations
+**Smell:** Complex object instantiation (e.g., `ProductEchoLLMProvider` with 5 kwargs) duplicated identically across a single function's body.
+**Learning:** Found in `_resolve_provider` where a fallback object instantiation and a factory lambda required the exact same arguments. This kind of duplication leads to parameter drift if not maintained carefully.
+**Action:** Extract the complex instantiation into a local `def` helper function to reuse the instantiation logic (and in this case, the lambda factory itself).

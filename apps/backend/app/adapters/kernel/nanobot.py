@@ -453,23 +453,20 @@ class NanobotKernelAdapter(AgentKernelPort):
             if not model_name:
                 msg = f"Provider `{provider_name}` is configured without a model name."
                 raise ValueError(msg)
+
+        def create_product_echo() -> ProductEchoLLMProvider:
+            return ProductEchoLLMProvider(
+                agent_name=request.identity.name,
+                identity_text=request.identity.identity_text,
+                soul_text=request.soul.soul_text,
+                user_context_text=request.soul.user_context_text,
+                policy_base_text=request.soul.policy_base_text,
+            )
+
         return build_provider(
             provider_name=provider_name,
-            model_name=model_name
-            or ProductEchoLLMProvider(
-                agent_name=request.identity.name,
-                identity_text=request.identity.identity_text,
-                soul_text=request.soul.soul_text,
-                user_context_text=request.soul.user_context_text,
-                policy_base_text=request.soul.policy_base_text,
-            ).get_default_model(),
-            product_echo_factory=lambda: ProductEchoLLMProvider(
-                agent_name=request.identity.name,
-                identity_text=request.identity.identity_text,
-                soul_text=request.soul.soul_text,
-                user_context_text=request.soul.user_context_text,
-                policy_base_text=request.soul.policy_base_text,
-            ),
+            model_name=model_name or create_product_echo().get_default_model(),
+            product_echo_factory=create_product_echo,
         )
 
     def _build_provider(self, request: KernelExecutionRequest) -> LLMProvider:
