@@ -35,6 +35,7 @@ export function AgentSettingsPanel({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled) return;
     onSave();
   }
 
