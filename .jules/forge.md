@@ -17,3 +17,7 @@
 
 
 
+## 2024-03-22 - Missing tests for memory policy text redaction and injection checks
+**Gap:** The memory policy module (`app/memory/policy.py`) lacked test coverage for critical security behaviors, specifically regarding the redaction of secrets and the flagging of prompt injection patterns in automatic and manual text inspection.
+**Learning:** Text inspection logic involving regex patterns (e.g., `SECRET_PATTERNS` and `INJECTION_PATTERNS`) is susceptible to edge cases and requires explicit regression tests to ensure sensitive data is actually redacted and injection attempts are correctly flagged before being stored in memory.
+**Action:** When implementing or modifying text sanitization, redaction, or security scanning logic, always add comprehensive tests covering both positive (clean text) and negative (flagged/redacted text) cases to ensure the patterns are robust and the resulting security state is accurately captured.
