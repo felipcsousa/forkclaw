@@ -75,6 +75,8 @@ export function CronJobsPanel({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isCreating || isMutating) return;
+
     onCreateJob({
       name: name.trim(),
       schedule: schedule.trim(),
