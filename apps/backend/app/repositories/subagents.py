@@ -426,10 +426,18 @@ class SubagentRepository:
                 .order_by(SessionSubagentRun.started_at.asc(), SessionSubagentRun.created_at.asc())
             )
         )
+
+        session_ids = set()
+        for run in running_runs:
+            session_ids.add(run.child_session_id)
+            session_ids.add(run.launcher_session_id)
+
+        sessions = {s.id: s for s in self.get_sessions(list(session_ids))}
+
         items: list[tuple[SessionSubagentRun, SessionRecord, SessionRecord]] = []
         for run in running_runs:
-            child = self.get_session(run.child_session_id)
-            parent = self.get_session(run.launcher_session_id)
+            child = sessions.get(run.child_session_id)
+            parent = sessions.get(run.launcher_session_id)
             if child is None or parent is None:
                 continue
             items.append((run, child, parent))
