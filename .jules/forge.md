@@ -17,3 +17,7 @@
 
 
 
+## 2024-03-26 - Missing double-submission prevention in Settings Forms
+**Gap:** Form submission handlers (`onSubmit`) in components like `AgentSettingsPanel`, `OperationalSettingsPanel`, and `CronJobsPanel` lacked explicit early return guard clauses to prevent double-submissions when triggered via keyboard events while the "Save" or "Create" buttons were `disabled`.
+**Learning:** In React components, form `onSubmit` events can still be triggered by hitting 'Enter', bypassing the `disabled` state of the submit button itself. To effectively prevent duplicate API requests or unexpected state mutations, an explicit early return condition (e.g., `if (disabled) return;`) must be written directly inside the `onSubmit` handler.
+**Action:** When testing React form components that involve async mutations, always explicitly test that double-submissions are blocked by calling `fireEvent.submit(form)` and asserting that the mutation handler (like `onSave` or `onCreate`) is not called when the component is in a loading or disabled state.
