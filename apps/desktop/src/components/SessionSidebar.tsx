@@ -118,7 +118,7 @@ export function SessionSidebar({
                     data-testid={`session-item-${session.id}`}
                     data-active={session.id === activeSessionId ? 'true' : 'false'}
                     className={cn(
-                      'group relative w-full rounded-lg border border-transparent px-3 py-1.5 text-left transition-all duration-200 outline-none',
+                      'group relative w-full rounded-lg border border-transparent px-3 py-1.5 text-left transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
                       session.id === activeSessionId
                         ? 'bg-foreground/[0.04] text-foreground font-medium'
                         : 'text-sidebar-muted-foreground hover:bg-foreground/[0.03] hover:text-sidebar-foreground',
