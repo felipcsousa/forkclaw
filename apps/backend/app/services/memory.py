@@ -108,13 +108,16 @@ class MemoryService:
         filtered: list[MemoryItemRead] = []
 
         for item in items:
+            # Evaluate fast boolean checks before doing expensive string operations
             if kind and item.kind != kind:
-                continue
-            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
                 continue
             if mode == "manual" and not item.is_manual:
                 continue
             if mode == "automatic" and item.is_manual:
+                continue
+
+            # Defer _normalize_label method call and string manipulations until required
+            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
                 continue
             if query_text:
                 haystack = " ".join(
