@@ -482,10 +482,7 @@ class MemoryService:
         )
         grouped = self._group_recall_rows(list(self.session.exec(statement)))
 
-        all_record_ids = []
-        for _, rows in grouped:
-            all_record_ids.extend([row.record_id or row.memory_id or "" for row in rows])
-        items_map = self._batch_get_items([rid for rid in all_record_ids if rid])
+        items_map = self._batch_get_items_for_groups(grouped)
 
         return [
             SessionRecallSummaryRead(
@@ -509,10 +506,7 @@ class MemoryService:
         )
         grouped = self._group_recall_rows(list(self.session.exec(statement)))
 
-        all_record_ids = []
-        for _, rows in grouped:
-            all_record_ids.extend([row.record_id or row.memory_id or "" for row in rows])
-        items_map = self._batch_get_items([rid for rid in all_record_ids if rid])
+        items_map = self._batch_get_items_for_groups(grouped)
 
         return [
             MemoryRecallLogEntryRead(
@@ -529,6 +523,14 @@ class MemoryService:
             )
             for assistant_message_id, rows in grouped
         ]
+
+    def _batch_get_items_for_groups(
+        self, grouped_rows: list[tuple[str, list[MemoryRecallLog]]]
+    ) -> dict[str, MemoryItemRead]:
+        all_record_ids = []
+        for _, rows in grouped_rows:
+            all_record_ids.extend([row.record_id or row.memory_id or "" for row in rows])
+        return self._batch_get_items([rid for rid in all_record_ids if rid])
 
     def _batch_get_items(self, memory_ids: list[str]) -> dict[str, MemoryItemRead]:
         if not memory_ids:
