@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import {
   fetchOperationalSettings,
@@ -55,6 +55,7 @@ export function useOperationalSettingsController({
     useState(false);
   const [isSavingOperationalSettings, setIsSavingOperationalSettings] =
     useState(false);
+  const isSavingOperationalSettingsRef = useRef(false);
 
   const loadOperationalSettings = useCallback(async () => {
     const response = await runAsyncAction(() => fetchOperationalSettings(), {
@@ -81,6 +82,8 @@ export function useOperationalSettingsController({
   );
 
   const handleSaveOperationalSettings = useCallback(async () => {
+    if (isSavingOperationalSettingsRef.current) return null;
+
     if (
       !operationalDraft.model_name.trim() ||
       !operationalDraft.workspace_root.trim()
@@ -89,26 +92,31 @@ export function useOperationalSettingsController({
       return null;
     }
 
-    const saved = await runAsyncAction(
-      () =>
-        updateOperationalSettings({
-          ...operationalDraft,
-          model_name: operationalDraft.model_name.trim(),
-          workspace_root: operationalDraft.workspace_root.trim(),
-          api_key: operationalDraft.api_key?.trim() || null,
-        }),
-      {
-        setPending: setIsSavingOperationalSettings,
-        errorMessage: 'Failed to save operational settings.',
-      },
-    );
-    if (!saved) {
-      return null;
-    }
+    isSavingOperationalSettingsRef.current = true;
+    try {
+      const saved = await runAsyncAction(
+        () =>
+          updateOperationalSettings({
+            ...operationalDraft,
+            model_name: operationalDraft.model_name.trim(),
+            workspace_root: operationalDraft.workspace_root.trim(),
+            api_key: operationalDraft.api_key?.trim() || null,
+          }),
+        {
+          setPending: setIsSavingOperationalSettings,
+          errorMessage: 'Failed to save operational settings.',
+        },
+      );
+      if (!saved) {
+        return null;
+      }
 
-    setOperationalSettings(saved);
-    setOperationalDraft(toOperationalDraft(saved));
-    return saved;
+      setOperationalSettings(saved);
+      setOperationalDraft(toOperationalDraft(saved));
+      return saved;
+    } finally {
+      isSavingOperationalSettingsRef.current = false;
+    }
   }, [operationalDraft, runAsyncAction, setErrorMessage]);
 
   return {
