@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import {
   fetchAgentConfig,
@@ -43,6 +43,8 @@ export function useAgentProfileController({
   const [isLoadingAgent, setIsLoadingAgent] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
   const [isResettingAgent, setIsResettingAgent] = useState(false);
+  const isSavingAgentRef = useRef(false);
+  const isResettingAgentRef = useRef(false);
 
   const loadAgentConfig = useCallback(async () => {
     const response = await runAsyncAction(() => fetchAgentConfig(), {
@@ -66,6 +68,8 @@ export function useAgentProfileController({
   );
 
   const handleSaveAgentConfig = useCallback(async () => {
+    if (isSavingAgentRef.current) return null;
+
     if (
       !agentDraft.name.trim() ||
       !agentDraft.identity_text.trim() ||
@@ -79,43 +83,54 @@ export function useAgentProfileController({
       return null;
     }
 
-    const saved = await runAsyncAction(
-      () =>
-        updateAgentConfig({
-          name: agentDraft.name.trim(),
-          description: agentDraft.description.trim(),
-          identity_text: agentDraft.identity_text.trim(),
-          soul_text: agentDraft.soul_text.trim(),
-          user_context_text: agentDraft.user_context_text.trim(),
-          policy_base_text: agentDraft.policy_base_text.trim(),
-          model_name: agentDraft.model_name.trim(),
-        }),
-      {
-        setPending: setIsSavingAgent,
-        errorMessage: 'Failed to save agent profile.',
-      },
-    );
-    if (!saved) {
-      return null;
-    }
+    isSavingAgentRef.current = true;
+    try {
+      const saved = await runAsyncAction(
+        () =>
+          updateAgentConfig({
+            name: agentDraft.name.trim(),
+            description: agentDraft.description.trim(),
+            identity_text: agentDraft.identity_text.trim(),
+            soul_text: agentDraft.soul_text.trim(),
+            user_context_text: agentDraft.user_context_text.trim(),
+            policy_base_text: agentDraft.policy_base_text.trim(),
+            model_name: agentDraft.model_name.trim(),
+          }),
+        {
+          setPending: setIsSavingAgent,
+          errorMessage: 'Failed to save agent profile.',
+        },
+      );
+      if (!saved) {
+        return null;
+      }
 
-    setAgent(saved);
-    setAgentDraft(toAgentDraft(saved));
-    return saved;
+      setAgent(saved);
+      setAgentDraft(toAgentDraft(saved));
+      return saved;
+    } finally {
+      isSavingAgentRef.current = false;
+    }
   }, [agentDraft, runAsyncAction, setErrorMessage]);
 
   const handleResetAgentConfig = useCallback(async () => {
-    const reset = await runAsyncAction(() => resetAgentConfig(), {
-      setPending: setIsResettingAgent,
-      errorMessage: 'Failed to restore agent defaults.',
-    });
-    if (!reset) {
-      return null;
-    }
+    if (isResettingAgentRef.current) return null;
+    isResettingAgentRef.current = true;
+    try {
+      const reset = await runAsyncAction(() => resetAgentConfig(), {
+        setPending: setIsResettingAgent,
+        errorMessage: 'Failed to restore agent defaults.',
+      });
+      if (!reset) {
+        return null;
+      }
 
-    setAgent(reset);
-    setAgentDraft(toAgentDraft(reset));
-    return reset;
+      setAgent(reset);
+      setAgentDraft(toAgentDraft(reset));
+      return reset;
+    } finally {
+      isResettingAgentRef.current = false;
+    }
   }, [runAsyncAction]);
 
   return {

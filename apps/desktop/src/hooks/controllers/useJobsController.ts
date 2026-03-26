@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import {
   activateCronJob,
@@ -26,6 +26,8 @@ export function useJobsController({
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [isMutatingJob, setIsMutatingJob] = useState(false);
+  const isCreatingJobRef = useRef(false);
+  const isMutatingJobRef = useRef(false);
 
   const loadJobs = useCallback(async () => {
     const response = await runAsyncAction(() => fetchCronJobsDashboard(), {
@@ -44,45 +46,74 @@ export function useJobsController({
 
   const handleCreateJob = useCallback(
     async (payload: CronJobCreateInput) => {
+      if (isCreatingJobRef.current) return null;
+
       if (!payload.name.trim() || !payload.schedule.trim()) {
         setErrorMessage('Job name and schedule are required.');
         return null;
       }
-      return runAsyncAction(() => createCronJob(payload), {
-        setPending: setIsCreatingJob,
-        errorMessage: 'Failed to create scheduled job.',
-      });
+
+      isCreatingJobRef.current = true;
+      try {
+        return await runAsyncAction(() => createCronJob(payload), {
+          setPending: setIsCreatingJob,
+          errorMessage: 'Failed to create scheduled job.',
+        });
+      } finally {
+        isCreatingJobRef.current = false;
+      }
     },
     [runAsyncAction, setErrorMessage],
   );
 
   const handlePauseJob = useCallback(
-    async (jobId: string) =>
-      runAsyncAction(() => pauseCronJob(jobId), {
-        setPending: setIsMutatingJob,
-        errorMessage: 'Failed to pause scheduled job.',
-      }),
+    async (jobId: string) => {
+      if (isMutatingJobRef.current) return null;
+      isMutatingJobRef.current = true;
+      try {
+        return await runAsyncAction(() => pauseCronJob(jobId), {
+          setPending: setIsMutatingJob,
+          errorMessage: 'Failed to pause scheduled job.',
+        });
+      } finally {
+        isMutatingJobRef.current = false;
+      }
+    },
     [runAsyncAction],
   );
 
   const handleActivateJob = useCallback(
-    async (jobId: string) =>
-      runAsyncAction(() => activateCronJob(jobId), {
-        setPending: setIsMutatingJob,
-        errorMessage: 'Failed to activate scheduled job.',
-      }),
+    async (jobId: string) => {
+      if (isMutatingJobRef.current) return null;
+      isMutatingJobRef.current = true;
+      try {
+        return await runAsyncAction(() => activateCronJob(jobId), {
+          setPending: setIsMutatingJob,
+          errorMessage: 'Failed to activate scheduled job.',
+        });
+      } finally {
+        isMutatingJobRef.current = false;
+      }
+    },
     [runAsyncAction],
   );
 
   const handleRemoveJob = useCallback(
-    async (jobId: string) =>
-      runAsyncAction(async () => {
-        await deleteCronJob(jobId);
-        return { ok: true };
-      }, {
-        setPending: setIsMutatingJob,
-        errorMessage: 'Failed to remove scheduled job.',
-      }),
+    async (jobId: string) => {
+      if (isMutatingJobRef.current) return null;
+      isMutatingJobRef.current = true;
+      try {
+        return await runAsyncAction(async () => {
+          await deleteCronJob(jobId);
+          return { ok: true };
+        }, {
+          setPending: setIsMutatingJob,
+          errorMessage: 'Failed to remove scheduled job.',
+        });
+      } finally {
+        isMutatingJobRef.current = false;
+      }
+    },
     [runAsyncAction],
   );
 
