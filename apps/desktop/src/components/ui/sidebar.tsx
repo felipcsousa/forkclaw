@@ -83,7 +83,7 @@ const SidebarMenuButton = ({
   <button
     data-active={isActive ? 'true' : 'false'}
     className={cn(
-      'group/sidebar flex w-full items-center justify-between rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-all duration-200 outline-none',
+      'group/sidebar flex w-full items-center justify-between rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring',
       isActive
         ? 'bg-foreground/[0.04] text-foreground font-medium'
         : 'text-sidebar-muted-foreground hover:bg-foreground/[0.03] hover:text-sidebar-foreground',
