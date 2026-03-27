@@ -96,6 +96,7 @@ def get_session_by_id(
 @router.post(
     "/sessions/{session_id}/reset",
     response_model=SessionRead,
+    response_model_exclude_none=True,
 )
 def reset_session_conversation(
     session_id: str,

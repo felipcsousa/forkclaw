@@ -934,7 +934,7 @@ def test_session_reset_rotates_conversation_id_and_hides_old_messages(
 
     assert reset_payload["id"] == session_id
     assert reset_payload["conversation_id"] != original_conversation_id
-    assert reset_payload["summary"] is None
+    assert "summary" not in reset_payload
 
     empty_messages = test_client.get(f"/sessions/{session_id}/messages")
     assert empty_messages.status_code == 200
