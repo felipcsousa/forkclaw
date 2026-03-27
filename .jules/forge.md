@@ -17,3 +17,7 @@
 
 
 
+## 2024-03-27 - Missing tests for Approval error and state transitions logic
+**Gap:** The `/approvals` API endpoints lacked test coverage for error paths such as retrieving or modifying non-existent, or previously settled, approvals (e.g. 404 paths in `get_approval`, `approve`, and `deny` via `_require_pending_bundle`).
+**Learning:** By not asserting on HTTP error status mappings for business logic constraints, we fail to ensure that clients safely fail against bad input.
+**Action:** When validating API facades mapped to domain services, explicitly mock or trigger domain-level failures (`ValueError` cases like "Approval not found" or "Approval is not pending") to verify they correctly map to 404 or 400 responses.
