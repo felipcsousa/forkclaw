@@ -5,3 +5,7 @@
 ## 2024-05-15 - [Hoist \`utc_now\` calls out of loops]
 **Learning:** Calling \`MemorySearchService._now()\` inside the list ranking loop \`_rank_working_items\` introduces huge overhead for large candidate arrays.
 **Action:** Always hoist current time evaluations (like \`utc_now()\` or \`self._now()\`) outside loops to avoid significant execution overhead.
+
+## 2026-03-27 - [Optimize list_running_subagents]
+**Learning:** Fetching related items inside a loop using `self.get_session()` introduces N+1 query overhead.
+**Action:** Always collect unique foreign key IDs into a set before the loop, fetch them in a single batch query (e.g. `self.get_sessions(list(session_ids))`), and map the results into a dictionary for fast local lookups.
