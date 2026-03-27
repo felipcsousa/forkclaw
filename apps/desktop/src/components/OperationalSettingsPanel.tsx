@@ -63,6 +63,7 @@ export function OperationalSettingsPanel({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled) return;
     onSave();
   }
 
