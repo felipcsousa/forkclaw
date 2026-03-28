@@ -19,20 +19,17 @@ const SidebarHeader = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      'px-4 py-3',
-      className,
-    )}
-    {...props}
-  />
+  <div className={cn('px-4 py-3', className)} {...props} />
 );
 
 const SidebarContent = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col px-3 py-3', className)} {...props} />
+  <div
+    className={cn('flex min-h-0 min-w-0 flex-1 flex-col px-3 py-3', className)}
+    {...props}
+  />
 );
 
 const SidebarFooter = ({
@@ -83,7 +80,7 @@ const SidebarMenuButton = ({
   <button
     data-active={isActive ? 'true' : 'false'}
     className={cn(
-      'group/sidebar flex w-full items-center justify-between rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-all duration-200 outline-none',
+      'group/sidebar flex w-full items-center justify-between rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring',
       isActive
         ? 'bg-foreground/[0.04] text-foreground font-medium'
         : 'text-sidebar-muted-foreground hover:bg-foreground/[0.03] hover:text-sidebar-foreground',
