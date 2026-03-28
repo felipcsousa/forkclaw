@@ -198,28 +198,18 @@ class MemoryAdminService:
         if content_changed and entry.source_kind in {"autosaved", "summary"}:
             entry.source_kind = "user_override"
         entry.updated_by = "user"
-        saved = self.repository.save_entry(entry)
-        self._log_change(
-            memory_id=saved.id,
-            action="edit",
-            before_snapshot=before,
-            after_snapshot=self._snapshot(saved),
-        )
-        return saved
+        return self._save_and_log(entry, action="edit", before_snapshot=before)
 
     def _toggle_hidden(self, memory_id: str, *, hidden: bool) -> MemoryEntry:
         entry = self._require_entry(memory_id)
         before = self._snapshot(entry)
         entry.hidden_from_recall = hidden
         entry.updated_by = "user"
-        saved = self.repository.save_entry(entry)
-        self._log_change(
-            memory_id=saved.id,
+        return self._save_and_log(
+            entry,
             action="hide_from_recall" if hidden else "unhide_from_recall",
             before_snapshot=before,
-            after_snapshot=self._snapshot(saved),
         )
-        return saved
 
     def _promote(self, memory_id: str) -> MemoryEntry:
         entry = self._require_entry(memory_id)
@@ -251,14 +241,7 @@ class MemoryAdminService:
         before = self._snapshot(entry)
         entry.scope_type = "episodic"
         entry.updated_by = "user"
-        saved = self.repository.save_entry(entry)
-        self._log_change(
-            memory_id=saved.id,
-            action="demote",
-            before_snapshot=before,
-            after_snapshot=self._snapshot(saved),
-        )
-        return saved
+        return self._save_and_log(entry, action="demote", before_snapshot=before)
 
     def _soft_delete(self, memory_id: str) -> MemoryEntry:
         entry = self._require_entry(memory_id)
@@ -266,14 +249,7 @@ class MemoryAdminService:
         entry.lifecycle_state = "soft_deleted"
         entry.deleted_at = datetime.now(UTC)
         entry.updated_by = "user"
-        saved = self.repository.save_entry(entry)
-        self._log_change(
-            memory_id=saved.id,
-            action="soft_delete",
-            before_snapshot=before,
-            after_snapshot=self._snapshot(saved),
-        )
-        return saved
+        return self._save_and_log(entry, action="soft_delete", before_snapshot=before)
 
     def _restore(self, memory_id: str) -> MemoryEntry:
         entry = self._require_entry(memory_id)
@@ -281,14 +257,7 @@ class MemoryAdminService:
         entry.lifecycle_state = "active"
         entry.deleted_at = None
         entry.updated_by = "user"
-        saved = self.repository.save_entry(entry)
-        self._log_change(
-            memory_id=saved.id,
-            action="restore",
-            before_snapshot=before,
-            after_snapshot=self._snapshot(saved),
-        )
-        return saved
+        return self._save_and_log(entry, action="restore", before_snapshot=before)
 
     def _hard_delete(self, memory_id: str) -> dict[str, bool]:
         entry = self._require_entry(memory_id)
@@ -318,6 +287,18 @@ class MemoryAdminService:
             before_snapshot=before_snapshot,
             after_snapshot=after_snapshot,
         )
+
+    def _save_and_log(
+        self, entry: MemoryEntry, *, action: str, before_snapshot: dict[str, Any]
+    ) -> MemoryEntry:
+        saved = self.repository.save_entry(entry)
+        self._log_change(
+            memory_id=saved.id,
+            action=action,
+            before_snapshot=before_snapshot,
+            after_snapshot=self._snapshot(saved),
+        )
+        return saved
 
     def _require_entry(self, memory_id: str) -> MemoryEntry:
         entry = self.repository.get_entry(memory_id)

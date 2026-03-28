@@ -1,0 +1,4 @@
+🌱 Smell: The `MemoryAdminService` contained identical boilerplate of `save_entry()` immediately followed by `_log_change()` across 5 CRUD actions (`_update_entry`, `_toggle_hidden`, `_demote`, `_soft_delete`, `_restore`), cluttering the domain logic.
+✂️ Cleanup: Extracted a `_save_and_log` helper method to encapsulate the save and log operations, and updated the 5 methods to use it. `_promote` was left alone to preserve the exact order of side effects.
+🧠 Why it helps: Reduces visual noise and duplication, making the CRUD methods more readable and focused on their specific domain logic, while preventing future drift in how changes are logged.
+✅ Verification: `uv run ruff check` passed, `pytest tests/test_memory_admin.py` passed.
