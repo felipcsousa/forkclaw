@@ -110,12 +110,14 @@ class MemoryService:
         for item in items:
             if kind and item.kind != kind:
                 continue
-            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
-                continue
+            # ⚡ Bolt: Evaluate fast boolean mode checks before expensive scope normalization
             if mode == "manual" and not item.is_manual:
                 continue
             if mode == "automatic" and item.is_manual:
                 continue
+            if normalized_scope and self._normalize_label(item.scope) != normalized_scope:
+                continue
+            # ⚡ Bolt: Defer expensive string manipulations until after fast boolean checks
             if query_text:
                 haystack = " ".join(
                     [
