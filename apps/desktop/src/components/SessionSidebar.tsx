@@ -3,7 +3,11 @@ import { MessageSquarePlus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { SessionRecord } from '../lib/backend';
 
@@ -17,7 +21,8 @@ interface SessionSidebarProps {
 }
 
 function sessionTimestamp(session: SessionRecord) {
-  const candidate = session.last_message_at || session.updated_at || session.created_at;
+  const candidate =
+    session.last_message_at || session.updated_at || session.created_at;
   const parsed = new Date(candidate);
 
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -92,16 +97,21 @@ export function SessionSidebar({
           </div>
         ) : sessions.length === 0 ? (
           <div className="empty-dashed rounded-lg px-3 py-3">
-            <p className="text-sm font-medium text-foreground">No persistent sessions yet.</p>
+            <p className="text-sm font-medium text-foreground">
+              No persistent sessions yet.
+            </p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Create a new session to start a durable conversation with the agent.
+              Create a new session to start a durable conversation with the
+              agent.
             </p>
           </div>
         ) : (
           <div className="space-y-1 pb-2">
             {orderedSessions.map((session) => {
               const referenceTime = sessionTimestamp(session);
-              const currentGroup = groupLabel(referenceTime?.toISOString() || null);
+              const currentGroup = groupLabel(
+                referenceTime?.toISOString() || null,
+              );
               const showGroup = currentGroup !== lastGroup;
               lastGroup = currentGroup;
 
@@ -116,9 +126,11 @@ export function SessionSidebar({
                     type="button"
                     onClick={() => onSelectSession(session.id)}
                     data-testid={`session-item-${session.id}`}
-                    data-active={session.id === activeSessionId ? 'true' : 'false'}
+                    data-active={
+                      session.id === activeSessionId ? 'true' : 'false'
+                    }
                     className={cn(
-                      'group relative w-full rounded-lg border border-transparent px-3 py-1.5 text-left transition-all duration-200 outline-none',
+                      'group relative w-full rounded-lg border border-transparent px-3 py-1.5 text-left transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       session.id === activeSessionId
                         ? 'bg-foreground/[0.04] text-foreground font-medium'
                         : 'text-sidebar-muted-foreground hover:bg-foreground/[0.03] hover:text-sidebar-foreground',
@@ -139,11 +151,11 @@ export function SessionSidebar({
                         <p className="mt-1 truncate text-xs text-muted-foreground">
                           {referenceTime
                             ? referenceTime.toLocaleString([], {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
                             : 'Time unavailable'}
                         </p>
                       </div>
