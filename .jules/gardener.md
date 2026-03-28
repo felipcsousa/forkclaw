@@ -17,3 +17,8 @@
 **Smell:** Large Pydantic/SQLModel instantiations (`SessionSummary`) with ~18 arguments were duplicated verbatim across conditional guard clauses in `MemoryCaptureService.capture_execution_result`.
 **Learning:** This repo tends to copy-paste large model instantiations across branches which increases visual noise and the risk of drift if the model schema changes.
 **Action:** Extract large, repeated model instantiations into private helper functions (like `_build_session_summary`) to reduce duplication and keep complex route/service methods clean.
+
+## 2024-03-28 - Extract duplicated save and log pattern in MemoryAdminService
+**Smell:** Repeated pattern of calling `self.repository.save_entry(...)` immediately followed by `self._log_change(...)` across multiple CRUD methods in `MemoryAdminService`.
+**Learning:** Repetitive boilerplates for state changes like save + log make the code verbose and increase the chance of copy-paste errors or missing arguments.
+**Action:** Extract a private helper (e.g., `_save_and_log`) to combine saving an entry and recording its snapshot history consistently, keeping the domain methods focused on logic.
