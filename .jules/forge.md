@@ -17,3 +17,7 @@
 
 
 
+## 2026-03-28 - Testing Operational Settings API endpoints
+**Gap:** The `/settings/operational` endpoints lacked test coverage for domain-level exceptions mapping to HTTP status codes (e.g., `ValueError` and `SecretStoreError`).
+**Learning:** FastAPI endpoints that act as facades for domain services need explicit tests for exception handling to ensure HTTP status codes map correctly (e.g., 400, 404, 503).
+**Action:** When adding or verifying coverage for API routes wrapping domain services, mock the service to throw domain exceptions and assert the expected HTTP response.
