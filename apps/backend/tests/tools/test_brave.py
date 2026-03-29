@@ -1,9 +1,10 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from app.tools.web.providers.base import SearchProviderResponse
 from app.tools.web.providers.brave import BraveWebSearchProvider
-from app.tools.web.providers.base import SearchProviderResponse, SearchResultItem
-import httpx
+
 
 def test_brave_web_search_provider():
     with patch.dict("os.environ", {"BRAVE_API_KEY": "test_key"}), \

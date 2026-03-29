@@ -1,9 +1,11 @@
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from app.tools.base import ToolExecutionContext
 from app.tools.registry import EditFileTool
-from app.tools.base import ToolExecutionContext, ToolResult
+
 
 def test_edit_file_tool_replace_single():
     # Setup
@@ -125,6 +127,7 @@ def test_edit_file_tool_text_not_found():
 
 from app.tools.registry import ListFilesTool
 
+
 def test_list_directory_tool():
     # Setup
     workspace_root = Path("/tmp/test_workspace")
@@ -188,6 +191,7 @@ def test_list_directory_tool_not_a_dir():
 
 from app.tools.registry import ReadFileTool
 
+
 def test_read_file_tool():
     # Setup
     workspace_root = Path("/tmp/test_workspace")
@@ -238,6 +242,7 @@ def test_read_file_tool_not_a_file():
 
 from app.tools.registry import WriteFileTool
 
+
 def test_write_file_tool():
     workspace_root = Path("/tmp/test_workspace")
     context = MagicMock(spec=ToolExecutionContext)
@@ -259,12 +264,12 @@ def test_write_file_tool():
 
     mock_target.parent.mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_target.write_text.assert_called_once_with("new file content", encoding="utf-8")
-    assert result.output_data == {"bytes": len("new file content".encode("utf-8"))}
+    assert result.output_data == {"bytes": len(b"new file content")}
     assert "Wrote" in result.output_text
 
 
 from app.tools.registry import ClipboardReadTool, ClipboardWriteTool
-from unittest.mock import patch
+
 
 def test_clipboard_read_mac():
     with patch("platform.system", return_value="Darwin"), \
@@ -334,6 +339,7 @@ def test_clipboard_write_unsupported():
 
 from app.tools.registry import WebSearchTool
 
+
 def test_web_search_cached():
     context = MagicMock(spec=ToolExecutionContext)
     context.cache_store = MagicMock()
@@ -392,6 +398,7 @@ def test_web_search_uncached(mock_provider_class):
 
 
 from app.tools.registry import WebFetchTool
+
 
 def test_web_fetch_cached():
     context = MagicMock(spec=ToolExecutionContext)
@@ -453,7 +460,13 @@ def test_web_fetch_uncached(mock_fetch):
     context.cache_store.set_json.assert_called_once()
 
 
-from app.tools.registry import SpawnSubagentTool, ListSubagentsTool, GetSubagentTool, CancelSubagentTool
+from app.tools.registry import (
+    CancelSubagentTool,
+    GetSubagentTool,
+    ListSubagentsTool,
+    SpawnSubagentTool,
+)
+
 
 def test_spawn_subagent_tool():
     tool = SpawnSubagentTool()
@@ -475,7 +488,8 @@ def test_cancel_subagent_tool():
     with pytest.raises(RuntimeError, match="cancel_subagent is service-backed and must be executed via ToolService."):
         tool.execute(context=MagicMock(), arguments={})
 
-from app.tools.registry import AcpEnableTool, AcpDisableTool, AcpStatusTool
+from app.tools.registry import AcpDisableTool, AcpEnableTool, AcpStatusTool
+
 
 def test_acp_enable_tool():
     tool = AcpEnableTool()
@@ -494,6 +508,7 @@ def test_acp_status_tool():
 
 
 from app.tools.registry import ToolRegistry
+
 
 def test_tool_registry():
     registry = ToolRegistry()
@@ -534,7 +549,13 @@ def test_tool_registry():
     }
 
 
-from app.tools.registry import _require_string, _read_optional_int, _read_extract_mode, _format_search_results
+from app.tools.registry import (
+    _format_search_results,
+    _read_extract_mode,
+    _read_optional_int,
+    _require_string,
+)
+
 
 def test_require_string():
     assert _require_string({"key": "value"}, "key") == "value"
