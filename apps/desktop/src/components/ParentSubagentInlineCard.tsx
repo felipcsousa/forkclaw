@@ -55,9 +55,10 @@ export function ParentSubagentInlineCard({
               variant="secondary"
               className="h-8 gap-1.5 text-xs"
               onClick={() => onOpen(subagent.parent_session_id || '', subagent.id)}
+              aria-label={`Open child session: ${subagent.delegated_goal || subagent.title}`}
             >
               <ArrowUpRight className="h-3.5 w-3.5" />
-              Abrir sessão filha
+              Open child session
             </Button>
             {canCancel ? (
               <Button
@@ -67,18 +68,19 @@ export function ParentSubagentInlineCard({
                 className="h-8 gap-1.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => onCancel(subagent.parent_session_id || '', subagent.id)}
                 disabled={isCancelling}
+                aria-label={`Cancel child session: ${subagent.delegated_goal || subagent.title}`}
               >
                 <StopCircle className="h-3.5 w-3.5" />
-                {isCancelling ? 'Cancelando...' : 'Cancelar'}
+                {isCancelling ? 'Cancelling...' : 'Cancel'}
               </Button>
             ) : null}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <span>Criado em {formatTimestamp(subagent.created_at)}</span>
-          <span>Duração {formatDuration(subagent.run)}</span>
-          <span>Custo {formatEstimatedCost(subagent.run.estimated_cost_usd)}</span>
+          <span>Created {formatTimestamp(subagent.created_at)}</span>
+          <span>Duration {formatDuration(subagent.run)}</span>
+          <span>Cost {formatEstimatedCost(subagent.run.estimated_cost_usd)}</span>
           {subagent.run.task_run_id ? (
             <span className="inline-flex items-center gap-1">
               <Square className="h-3 w-3" />
