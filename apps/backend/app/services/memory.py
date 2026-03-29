@@ -137,12 +137,8 @@ class MemoryService:
         if entry is not None:
             return self._read_entry(entry)
 
-        summary = self.session.get(SessionSummary, memory_id)
-        if summary is not None:
-            return self._read_summary(summary)
-
-        msg = "Memory item not found."
-        raise ValueError(msg)
+        summary = self._require_summary(memory_id)
+        return self._read_summary(summary)
 
     def create_item(self, payload: MemoryItemCreate) -> MemoryItemRead:
         if payload.kind == "session_summary":
@@ -182,14 +178,10 @@ class MemoryService:
                 return self._read_entry(updated)
             return self._create_entry_override(entry, payload)
 
-        summary = self.session.get(SessionSummary, memory_id)
-        if summary is not None:
-            if summary.source_kind == "manual":
-                return self._update_manual_summary(summary, payload)
-            return self._create_summary_override(summary, payload)
-
-        msg = "Memory item not found."
-        raise ValueError(msg)
+        summary = self._require_summary(memory_id)
+        if summary.source_kind == "manual":
+            return self._update_manual_summary(summary, payload)
+        return self._create_summary_override(summary, payload)
 
     def hide_item(self, memory_id: str) -> MemoryItemRead:
         entry = self.repository.get_entry(memory_id)
