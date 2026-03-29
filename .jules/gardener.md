@@ -17,3 +17,7 @@
 **Smell:** Large Pydantic/SQLModel instantiations (`SessionSummary`) with ~18 arguments were duplicated verbatim across conditional guard clauses in `MemoryCaptureService.capture_execution_result`.
 **Learning:** This repo tends to copy-paste large model instantiations across branches which increases visual noise and the risk of drift if the model schema changes.
 **Action:** Extract large, repeated model instantiations into private helper functions (like `_build_session_summary`) to reduce duplication and keep complex route/service methods clean.
+## 2024-03-29 - Consolidate repeated null guards in MemoryService
+**Smell:** Repeated `session.get(...)` and manual `is None` checks with identical `ValueError` handling in multiple methods, while other methods use an extracted `_require_summary` helper.
+**Learning:** Inconsistent null handling happens when new methods are added without reusing existing private validation helpers, leading to duplicate error messaging and control flow.
+**Action:** Replace ad-hoc `get()` and manual `is None` checks with existing `_require_summary` helpers to consolidate validation logic and reduce method complexity.
