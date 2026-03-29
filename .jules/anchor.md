@@ -7,3 +7,7 @@
 **Failure mode:** State variables (like isSending) might not be correctly reset if an exception occurs in an inner function while updating the state, or if the component is unmounted. It may leave the state in an incorrect pending/loading state forever.
 **Learning:** Using a `finally` block around async side-effects ensures loading flags are always cleared and no race-conditions occur with the state setting flag, and using a React ref guarantees synchronous checks before the DOM renders.
 **Prevention:** Use a `finally` block and a React `useRef` when setting loading state that protects against double submission, ensuring it clears no matter what.
+## 2025-02-24 - Prevent double submission while a request is in flight
+**Failure mode:** Forms could be submitted multiple times if the user pressed the Enter key repeatedly while the form was in a disabled or loading state.
+**Learning:** The `disabled` attribute on a `<button type="submit">` only prevents mouse clicks from submitting the form. Keyboard events (like pressing Enter inside a text input) can bypass the button's disabled state and trigger the form's `onSubmit` handler directly.
+**Prevention:** When implementing React form `onSubmit` handlers, always include an explicit early return condition checking the component's disabled or loading state (e.g., `if (disabled) return;`) directly inside the handler.
