@@ -17,3 +17,7 @@
 
 
 
+## 2026-03-29 - Missing tests for operational settings endpoints
+**Gap:** The `/settings/operational` endpoints in `apps/backend/app/api/routes/settings.py` lacked test coverage for error handling (`ValueError` and `SecretStoreError`).
+**Learning:** FastAPI endpoints that map internal domain exceptions (like `SecretStoreError` or `ValueError`) to specific HTTP status codes (like 503 or 400) should be explicitly tested to ensure the contract is maintained and errors are not swallowed or mishandled as generic 500s.
+**Action:** When adding or verifying FastAPI endpoints, ensure all mapped exception paths are tested using mock services.
