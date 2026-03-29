@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import pytest
-from app.services.agent_os import AgentOSService
+
 from app.db.session import get_db_session
+from app.services.agent_os import AgentOSService
+
 
 def test_agent_os_service_error_handling(test_client):
     with get_db_session() as session:
         service = AgentOSService(session)
 
         # We need to temporarily remove the default agent to trigger this
-        from app.models.entities import Agent
         from sqlmodel import select
+
+        from app.models.entities import Agent
 
         agents = session.exec(select(Agent)).all()
         for agent in agents:
@@ -54,8 +57,9 @@ def test_agent_os_service_success_paths(test_client):
         assert reset.id == created.id
 
         # Check list session messages with valid ID
-        from app.models.entities import Message
         import uuid
+
+        from app.models.entities import Message
 
         # Add a test message to the session
         msg = Message(
@@ -103,8 +107,9 @@ def test_agent_os_service_reset_wrong_kind(test_client):
         service = AgentOSService(session)
 
         # Create a subagent session
-        from app.models.entities import SessionRecord
         import uuid
+
+        from app.models.entities import SessionRecord
 
         agent, _ = service.get_default_agent_bundle()
 
